@@ -8,6 +8,7 @@ setup(
     install_requires=[
         "requests>=2.25.0",
         "mcp>=1.3.0",
+        "langchain-aws>=0.2.15",
     ],
     python_requires=">=3.7",
 )
