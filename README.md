@@ -43,6 +43,12 @@ python -m unittest discover tests
 
 ## Usage
 
+Inspect:
+```bash
+npx @modelcontextprotocol/inspector python -m clickhouse_mcp
+```
+
+
 Basic usage example:
 ```python
 ```
