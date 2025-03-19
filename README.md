@@ -38,6 +38,10 @@ ruff check src tests
 
 Execute the test suite:
 ```bash
+# Run all tests (excluding the clickhouse and venv directories)
+python run_tests.py
+
+# Or using unittest directly (only looks in tests directory)
 python -m unittest discover tests
 ```
 

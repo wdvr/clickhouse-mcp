@@ -3,13 +3,22 @@
 import os
 import re
 import yaml
+import pickle
+import argparse
 from pathlib import Path
+from typing import List, Dict, Any, Tuple
+from src.clickhouse_mcp.docs_search import get_project_root
 
 
-def extract_frontmatter(content):
+def extract_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
     """
     Extract YAML frontmatter from the content if present.
-    Returns a tuple of (frontmatter_dict, content_without_frontmatter)
+    
+    Args:
+        content: Markdown content to extract frontmatter from.
+        
+    Returns:
+        A tuple of (frontmatter_dict, content_without_frontmatter)
     """
     frontmatter = {}
     content_without_frontmatter = content
@@ -26,11 +35,21 @@ def extract_frontmatter(content):
     return frontmatter, content_without_frontmatter
 
 
-def chunk_markdown_by_headers(filepath):
+def get_docs_dir() -> Path:
+    """Get the ClickHouse docs directory path."""
+    return get_project_root() / "clickhouse" / "docs" / "en"
+
+
+def chunk_markdown_by_headers(filepath: str) -> List[Dict[str, Any]]:
     """
     Extracts sections from a markdown file based on h1 and h2 headers.
-    Returns a list of chunks with h1 title appended to each h2 section.
-    Handles YAML frontmatter if present.
+    
+    Args:
+        filepath: Path to the markdown file to process.
+        
+    Returns:
+        List of chunks with h1 title appended to each h2 section.
+        Handles YAML frontmatter if present.
     """
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -51,6 +70,9 @@ def chunk_markdown_by_headers(filepath):
     # The pattern looks for ## heading followed by content until the next ## or end of file
     h2_sections = re.finditer(r'## (.+?)(?=\n## |\Z)', content_without_frontmatter, re.DOTALL)
     
+    # Get docs directory for path normalization
+    docs_dir = get_docs_dir()
+    
     chunks = []
     for section in h2_sections:
         section_text = section.group(0)
@@ -62,12 +84,20 @@ def chunk_markdown_by_headers(filepath):
             # Create a chunk with h1 title incorporated
             chunk_text = f"# {h1_title}: {h2_title}\n\n{section_text}"
             
+            # Try to make path relative to docs directory
+            try:
+                path = Path(filepath).relative_to(docs_dir)
+                path = str(path)
+            except ValueError:
+                # If not under docs directory, use the full path
+                path = str(filepath)
+            
             # Prepare metadata
             metadata = {
                 "source": str(filepath),
                 "document_title": h1_title,
                 "section_title": h2_title,
-                "path": str(filepath).replace("/Users/ivanzaitsev/clickhouse-mcp/clickhouse/docs/en/", "")
+                "path": path
             }
             
             # Add relevant frontmatter to metadata
@@ -83,10 +113,15 @@ def chunk_markdown_by_headers(filepath):
     return chunks
 
 
-def process_directory(directory_path):
+def process_directory(directory_path: str) -> List[Dict[str, Any]]:
     """
     Process all markdown files in a directory and its subdirectories.
-    Returns a list of all chunks from all files.
+    
+    Args:
+        directory_path: Path to the directory containing markdown files.
+        
+    Returns:
+        List of all chunks from all files.
     """
     all_chunks = []
     
@@ -101,23 +136,39 @@ def process_directory(directory_path):
     return all_chunks
 
 
-def save_chunks_to_pickle(chunks, output_file):
+def save_chunks_to_pickle(chunks: List[Dict[str, Any]], output_file: str) -> None:
     """
-    Save chunks to a pickle file for later use with langchain.
+    Save chunks to a pickle file for later use.
+    
+    Args:
+        chunks: List of document chunks to save.
+        output_file: Path to the output pickle file.
     """
-    import pickle
     with open(output_file, 'wb') as f:
         pickle.dump(chunks, f)
     print(f"Saved {len(chunks)} chunks to {output_file}")
 
 
+def get_default_output_path() -> Path:
+    """Get the default path for the output pickle file."""
+    return get_project_root() / "index" / "clickhouse_docs_chunks.pkl"
+
+
+def get_default_docs_path() -> Path:
+    """Get the default path for the documentation directory."""
+    return get_docs_dir() / "sql-reference"
+
+
 def main():
-    import argparse
-    
     parser = argparse.ArgumentParser(description='Chunk markdown files by headers for use with langchain.')
-    parser.add_argument('--dir', type=str, default="/Users/ivanzaitsev/clickhouse-mcp/clickhouse/docs/en/sql-reference",
+    
+    # Get default paths
+    default_docs_dir = get_default_docs_path()
+    default_output_file = get_default_output_path()
+    
+    parser.add_argument('--dir', type=str, default=str(default_docs_dir),
                         help='Directory containing markdown files to process')
-    parser.add_argument('--output', type=str, default="clickhouse_docs_chunks.pkl",
+    parser.add_argument('--output', type=str, default=str(default_output_file),
                         help='Output file to save the chunks (pickle format)')
     parser.add_argument('--save', action='store_true', 
                         help='Save chunks to pickle file')
@@ -140,7 +191,6 @@ def main():
         print("\nExample of first few chunks:")
         for i, chunk in enumerate(chunks[:3]):
             print(f"\n--- Chunk {i+1} ---")
-            print(f"Source: {chunk['metadata']['source']}")
             print(f"Document Title: {chunk['metadata']['document_title']}")
             print(f"Section Title: {chunk['metadata']['section_title']}")
             print(f"Content Preview: {chunk['content'][:150]}...\n")
