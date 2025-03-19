@@ -7,7 +7,7 @@ import pickle
 import argparse
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
-from src.clickhouse_mcp.docs_search import get_project_root
+from clickhouse_mcp.docs_search import get_project_root
 
 
 def extract_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
