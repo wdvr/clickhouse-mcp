@@ -3,6 +3,7 @@ import unittest
 from unittest import skipUnless
 
 from langchain_aws import BedrockEmbeddings
+from src.clickhouse_mcp import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
 
 class TestBedrockEmbeddings(unittest.TestCase):
 
@@ -14,8 +15,8 @@ class TestBedrockEmbeddings(unittest.TestCase):
         try:
             # Initialize Bedrock Embeddings
             embeddings = BedrockEmbeddings(
-                region_name="us-east-1",
-                model_id="amazon.titan-embed-text-v2:0"
+                region_name=DEFAULT_REGION,
+                model_id=DEFAULT_BEDROCK_MODEL
             )
             
             # Generate embeddings for a single query
@@ -24,7 +25,9 @@ class TestBedrockEmbeddings(unittest.TestCase):
 
             # debug-print
             print(f"Query: {query_text}")
-            print(f"Embedding: {query_embedding}")
+            print(f"Using model: {DEFAULT_BEDROCK_MODEL}")
+            print(f"Embedding length: {len(query_embedding)}")
+            print(f"Embedding sample: {query_embedding[:3]}...")
 
 
         except Exception as e:
