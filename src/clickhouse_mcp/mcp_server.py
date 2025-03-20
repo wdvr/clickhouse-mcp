@@ -35,7 +35,8 @@ def get_clickhouse_client() -> clickhouse_connect.driver.client.Client:
             port=os.getenv("CLICKHOUSE_PORT"),
             username=os.getenv("CLICKHOUSE_USER"),
             password=os.getenv("CLICKHOUSE_PASSWORD"),
-            database="default"
+            database="default",
+            secure=True
         )
     return clickhouse_client
 
