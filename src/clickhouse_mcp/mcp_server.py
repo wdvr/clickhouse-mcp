@@ -1,23 +1,27 @@
+from . import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
+from .vector_search import load_faiss_index, vector_search, get_default_index_path
+from langchain_community.vectorstores import FAISS
+from langchain_aws import BedrockEmbeddings
+from langchain.schema import Document
+import hashlib
 import clickhouse_connect
 import json
 from typing import Optional, Any, Dict, List
 import clickhouse_connect.common
 import clickhouse_connect.driver
 import clickhouse_connect.driver.client
+import clickhouse_connect.driver.exceptions
 import clickhouse_connect.driver.query
 from mcp.server.fastmcp import FastMCP, Context
 import os
 import sys
+import time
+import requests
 
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 
 # Import required modules for vector search
-from langchain.schema import Document
-from langchain_aws import BedrockEmbeddings
-from langchain_community.vectorstores import FAISS
-from .vector_search import load_faiss_index, vector_search, get_default_index_path
-from . import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
 
 
 # Create an MCP server
@@ -96,42 +100,80 @@ def readme_howto_use_clickhouse_tools() -> str:
         To get the schema of a table, use the `get_clickhouse_schema` tool with the table name.
         To explain a query, use the `explain_clickhouse_query` tool with a valid ClickHouse query string.
         To get the list of tables, use the `get_clickhouse_tables` tool.
+
+        Use this to create and run queries if user asks things like: 'how long does the average macos build job take?'
         """)
 
 
 @mcp.tool()
-def run_clickhouse_query(query: str) -> str:
-    """Runs a ClickHouse query and returns the result as a JSON file in /tmp.
+def run_clickhouse_query(query: str) -> Dict[str, Any]:
+    """Runs a ClickHouse query and returns the result as a JSON file in /tmp as well as some statistics.
     Args:
         query (str): The ClickHouse query to execute
 
     Returns:
-        str: The filepath of the JSON file containing the query result.
+        str: a dict containing the result of the query as a JSON string and some statistics about the query execution
+        result['result']: The result of the query as a JSON string
+        result['time']: The time taken to execute the query
+        result['rows']: The number of rows returned by the query
+        result['columns']: The number of columns returned by the query
+        result['error']: An error message if the query failed
+        result['hash']: The hash of the query result
+
     """
 
     client = get_clickhouse_client()
+    print("got the client")
 
-    res: Optional[clickhouse_connect.driver.query.QueryResult] = client.query(
-        query)
-    if res is None:
-        return "No results found for the query."
-    if res.result_rows is None or len(res.result_rows) == 0:
-        return "No data returned from the query."
-    # Convert to JSON string with size limit
-    json_result = safe_json_dumps(
-        res.result_rows, indent=2, max_size=MAX_RESPONSE_SIZE
+    start_time = time.time()  # Start timing the query execution
+    error = None
+    try:
+        res: Optional[clickhouse_connect.driver.query.QueryResult] = client.query(
+            query)
+    except clickhouse_connect.driver.exceptions.ClickHouseError as e:
+        return {
+            "result": None,
+            "time": time.time() - start_time,
+            "data": None,
+            "columns": [],
+            "error": f"Error running query: {e}",
+            "hash": None
+        }
+    except Exception as e:
+        return {
+            "result": None,
+            "time": time.time() - start_time,
+            "data": None,
+            "columns": [],
+            "error": f"Unexpected error: {e}",
+            "hash": None
+        }
+    end_time = time.time()  # End timing the query execution
+    # res_rows = res.result_rows if res is not None else []
+    # res_columns = res.result_columns if res is not None else []
+
+    column_names = res.column_names
+    json_result = json.dumps(
+        res.result_rows, indent=1
     )
-    if json_result is None:
-        return "Error: Failed to convert result to JSON."
+
     # Save to a temporary file - generate the filename to be unique
     filename = f"/tmp/clickhouse_query_result_{os.getpid()}.json"
+
     try:
         with open(filename, "w") as f:
-            f.write(json_result)
+            f.write(json_result)  # Write the JSON result to the file
     except IOError as e:
         return f"Error: Failed to write result to file. {e}"
     # Return the file path
-    return filename
+    return {
+        "result": json_result,
+        "time": end_time - start_time,
+        "data": len(json_result),
+        "columns": column_names,
+        "error": error,
+        "hash": hashlib.sha256(json_result.encode()).hexdigest()
+    }
 
 
 @mcp.tool()
@@ -154,6 +196,64 @@ def get_clickhouse_schema(table_name: str) -> str:
         return json_result
     except Exception as e:
         return f"Error: {e}"
+
+
+@mcp.tool()
+def get_slow_queries(last_x_hours: int) -> str:
+    """Get the list of slow queries from the ClickHouse system table.
+
+    Returns:
+        str: The name of the file containing the slow queries as a JSON string
+    """
+
+    QUERY = """
+    SELECT * FROM (
+    SELECT
+        round(avg(query_duration_ms)) AS realTimeMSAvg,
+        sum(query_duration_ms) as realTimeMSTotal,
+        round(quantile(0.5)(query_duration_ms)) as realTimeMSP50,
+        avg(memory_usage) as memoryBytesAvg,
+        sum(memory_usage) as memoryBytesTotal,
+        quantile(0.5)(memory_usage) as memoryBytesP50,
+        count(*) as num,
+        left(query_id, -37) as name
+    FROM
+        clusterAllReplicas(default, system.query_log)
+    WHERE
+        event_time >= now() - INTERVAL {last_x_hours} HOUR
+        AND event_time < now()
+        AND initial_user = 'hud_user'
+        AND length(query_id) > 37
+        AND type = 'QueryFinish'
+        AND left(query_id, -37) != 'adhoc'
+    GROUP BY
+        name
+    ) WHERE
+    realTimeMSAvg > 1000
+    ORDER BY num DESC
+    """
+
+    client = get_clickhouse_client()
+    try:
+        res = client.query(QUERY.format(last_x_hours=last_x_hours))
+        if res is None or res.result_rows is None or len(res.result_rows) == 0:
+            return "No data returned from the query."
+        # Find top 5 slowest
+        slowest_queries = sorted(
+            res.result_rows, key=lambda x: x[0], reverse=True)[:5]
+        filename = f"/tmp/clickhouse_slow_queries_{time.time()}.json"
+        json_result = json.dumps(res.result_rows, indent=2)
+        with open(filename, "w") as f:
+            f.write(json_result)
+        return {
+            "result_file": filename,
+            "top_5_called": [{"name": r[-1], "avg_dur": r[0], "num_calls": r[-2]} for r in res.result_rows[:5]],
+            "top_5_slowest": [{"name": r[-1], "avg_dur": r[0], "num_calls": r[-2]} for r in slowest_queries]
+        }
+    except clickhouse_connect.driver.exceptions.ClickHouseError as e:
+        return f"Clickhouse query error: {e}"
+    except Exception as e:
+        return f"Unexpected error: {e}"
 
 
 @mcp.tool()
@@ -197,28 +297,63 @@ def get_clickhouse_tables() -> str:
         return f"Error: {e}"
 
 
+@mcp.tool()
+def get_query_by_name(query_name: str, include_params: Optional[bool] = False) -> str:
+    """ Get the ClickHouse query by its name.
+    Args:
+        query_name (str): The name of the query to get
+        include_params (bool): Whether to include the parameters from params.json in the query
+    Returns:
+        str: The ClickHouse query as a JSON string
+    """
+    result_json = {}
+
+    query_url = f"https://raw.githubusercontent.com/pytorch/test-infra/refs/heads/main/torchci/clickhouse_queries/{query_name}/query.sql"
+    params_url = f"https://raw.githubusercontent.com/pytorch/test-infra/refs/heads/main/torchci/clickhouse_queries/{query_name}/params.json"
+
+    try:
+        query = requests.get(query_url).text
+        query = query.replace("\n", " ").strip()
+        result_json["query"] = query
+    except Exception as e:
+        result_json["error"] = f"Error: Failed to get query from {query_url}. {e}"
+        return json.dumps(result_json)
+
+    # get the params from the url if include_params is True
+    if include_params:
+        try:
+            params = requests.get(params_url).text
+            params_dict = json.loads(params)
+            result_json["params"] = params_dict
+        except Exception as e:
+            result_json["error"] = f"Error: Failed to get params from {params_url}. {e}"
+
+    return json.dumps(result_json)
+
+
 # Vector store singleton
 vector_store_instance: Optional[FAISS] = None
 
+
 def get_vector_store() -> FAISS:
     """Get or initialize the vector store singleton.
-    
+
     Returns:
         FAISS: The loaded vector store
     """
     global vector_store_instance
-    
+
     if vector_store_instance is None:
         # Initialize embeddings
         embeddings = BedrockEmbeddings(
             region_name=DEFAULT_REGION,
             model_id=DEFAULT_BEDROCK_MODEL
         )
-        
+
         # Load the FAISS index
         index_path = get_default_index_path()
         vector_store_instance = load_faiss_index(index_path, embeddings)
-        
+
     return vector_store_instance
 
 
@@ -230,38 +365,38 @@ def semantic_search_docs(
     limit: int = 300
 ) -> str:
     """Performs semantic search over ClickHouse documentation.
-    
+
     Args:
         query: The search query text
         page: Page number (starting from 1)
         per_page: Number of results per page
         limit: Maximum character length for each result's content
-        
+
     Returns:
         The formatted search results with markdown content
     """
     try:
         # Get the vector store singleton
         vector_store = get_vector_store()
-        
+
         # Calculate pagination offsets
         start_idx = (page - 1) * per_page
         end_idx = start_idx + per_page
-        
+
         # We need to fetch enough results to cover the requested page
         num_results = end_idx
-        
+
         # Perform the semantic search
         search_results = vector_search(vector_store, query, num_results)
-        
+
         # Apply pagination
         paginated_results = search_results[start_idx:end_idx]
-        
+
         # Prepare result text with clear delimiters
         results_text = f"Search results for: '{query}'\n\n"
-        results_text += f"Page {page} of {(len(search_results) + per_page - 1) // per_page} " 
+        results_text += f"Page {page} of {(len(search_results) + per_page - 1) // per_page} "
         results_text += f"({len(search_results)} total results)\n\n"
-        
+
         # Format each result with delimiters
         for i, result in enumerate(paginated_results):
             results_text += f"==== RESULT {i+1} ====\n"
@@ -269,23 +404,24 @@ def semantic_search_docs(
             results_text += f"SECTION: {result.metadata.get('section_title', 'Unknown')}\n"
             results_text += f"SOURCE: {result.metadata.get('path', 'Unknown')}\n"
             results_text += "CONTENT:\n"
-            
+
             # Include content with truncation if needed
             content = result.page_content
             if limit and len(content) > limit:
                 content = content[:limit] + "...(truncated)"
-                
+
             results_text += content + "\n"
             results_text += "==================\n\n"
-        
+
         # Add pagination instructions
         if page > 1:
-            results_text += "For previous results: Use page=" + str(page-1) + "\n"
+            results_text += "For previous results: Use page=" + \
+                str(page-1) + "\n"
         if page < (len(search_results) + per_page - 1) // per_page:
             results_text += "For more results: Use page=" + str(page+1) + "\n"
-            
+
         return results_text
-        
+
     except FileNotFoundError:
         return "ERROR: FAISS index not found. Please make sure the index has been created."
     except Exception as e:
