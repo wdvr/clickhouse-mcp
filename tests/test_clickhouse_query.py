@@ -10,6 +10,7 @@ from clickhouse_mcp.mcp_server import (
     get_clickhouse_schema,
     explain_clickhouse_query,
     get_clickhouse_tables,
+    lint_clickhouse_query,
     safe_json_dumps,
     MAX_RESPONSE_SIZE
 )
@@ -179,5 +180,69 @@ class TestClickhouseQuery(unittest.TestCase):
             self.mock_get_client.return_value = self.mock_client
 
 
+class TestClickhouseLinter(unittest.TestCase):
+    def test_empty_query(self):
+        """Test linting an empty query."""
+        result = lint_clickhouse_query("")
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["errors_count"], 1)
+        self.assertIsNone(result["formatted_query"])
+        
+    def test_valid_query(self):
+        """Test linting a valid query."""
+        query = "SELECT column1, column2 FROM table WHERE condition = 1 ORDER BY column1"
+        with patch('sqlfluff.lint') as mock_lint, patch('sqlfluff.fix') as mock_fix:
+            
+            # Mock the lint result
+            mock_lint.return_value = []  # No violations
+            
+            # Mock the fix result - same as input for valid query
+            mock_fix.return_value = {"fix_str": query}
+            
+            result = lint_clickhouse_query(query)
+            
+            # Should be a passing result
+            self.assertEqual(result["status"], "pass")
+            self.assertEqual(result["errors_count"], 0)
+            self.assertEqual(result["errors"], [])
+            self.assertIsNone(result["formatted_query"])  # No formatted query for valid input
+    
+    def test_invalid_query(self):
+        """Test linting an invalid query with formatting issues."""
+        query = "SELECT    column1,column2     FROM table where CONDITION=1 order by column1"
+        with patch('sqlfluff.lint') as mock_lint, patch('sqlfluff.fix') as mock_fix:
+            
+            # Create mock violations
+            mock_violation1 = MagicMock()
+            mock_violation1.rule_code.return_value = "L001"
+            mock_violation1.description.return_value = "Unnecessary whitespace"
+            mock_violation1.line_no = 1
+            mock_violation1.line_pos = 5
+            mock_violation1.line_str = "SELECT    column1"
+            
+            mock_violation2 = MagicMock()
+            mock_violation2.rule_code.return_value = "L010"
+            mock_violation2.description.return_value = "Keywords must be capitalized"
+            mock_violation2.line_no = 1
+            mock_violation2.line_pos = 30
+            mock_violation2.line_str = "FROM table where"
+            
+            mock_lint.return_value = [mock_violation1, mock_violation2]
+            
+            # Mock the fix result
+            formatted = "SELECT column1, column2 FROM table WHERE condition = 1 ORDER BY column1"
+            mock_fix.return_value = {"fix_str": formatted}
+            
+            result = lint_clickhouse_query(query)
+            
+            # Should be a failing result with violations
+            self.assertEqual(result["status"], "fail")
+            self.assertEqual(result["errors_count"], 2)
+            self.assertEqual(len(result["errors"]), 2)
+            self.assertEqual(result["formatted_query"], formatted)
+            self.assertEqual(result["errors"][0]["rule"], "L001")
+            self.assertEqual(result["errors"][1]["rule"], "L010")
+    
+    
 if __name__ == "__main__":
     unittest.main()

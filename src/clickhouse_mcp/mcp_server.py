@@ -19,6 +19,8 @@ from mcp.server.fastmcp import FastMCP, Context
 import os
 import time
 import requests
+import sqlfluff
+import tempfile
 
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
@@ -125,7 +127,8 @@ def readme_howto_use_clickhouse_tools() -> str:
         To get the schema of a table, use the `get_clickhouse_schema` tool with the table name.
         To explain a query, use the `explain_clickhouse_query` tool with a valid ClickHouse query string.
         To get the list of tables, use the `get_clickhouse_tables` tool.
-        Use semantic_search_docs to search specific clickhouse functions and syntax in case of doubt or syntax errors.
+        Use `semantic_search_docs` to search specific clickhouse functions and syntax in case of doubt or syntax errors.
+        Use `lint_clickhouse_query` to validate and format your SQL queries according to best practices.
 
         Use this to create and run queries if user asks things like: 'how long does the average macos build job take?'
         """)
@@ -506,6 +509,91 @@ def semantic_search_docs(
         return "ERROR: FAISS index not found. Please make sure the index has been created."
     except Exception as e:
         return f"ERROR: Search failed: {str(e)}"
+
+
+@mcp.tool()
+def lint_clickhouse_query(
+    query: str,
+    rule_exclude: Optional[str] = None
+) -> Dict[str, Any]:
+    """Lint a ClickHouse SQL query using SQLFluff.
+
+    Args:
+        query (str): The ClickHouse SQL query to lint
+        rule_exclude (Optional[str]): Comma-separated list of rules to exclude (e.g. "L001,L002")
+
+    Returns:
+        Dict containing:
+        - 'status': Whether the query passed linting ('pass' or 'fail')
+        - 'errors_count': Number of linting errors found
+        - 'errors': List of linting errors with details
+        - 'formatted_query': Formatted SQL query (only if different from input)
+    """
+    if not query or not query.strip():
+        return {
+            "status": "fail",
+            "errors_count": 1,
+            "errors": ["Empty query provided"],
+            "formatted_query": None
+        }
+    
+    try:
+        # Set up config for sqlfluff
+        config = {
+            "dialect": "clickhouse"
+        }
+        if rule_exclude:
+            config["exclude_rules"] = rule_exclude.split(",")
+        
+        # Create a temporary file for better error reporting
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as tmp_file:
+            tmp_file.write(query)
+            tmp_path = tmp_file.name
+        
+        try:
+            # Lint the query
+            linting_result = sqlfluff.lint(tmp_path, config=config)
+            
+            # Format the query
+            formatted_result = sqlfluff.fix(tmp_path, config=config)
+            formatted_query = formatted_result.get("fix_str", query)
+            
+            # Process the linting results
+            errors = []
+            for violation in linting_result:
+                errors.append({
+                    "rule": violation.rule_code(),
+                    "description": violation.description(),
+                    "line": violation.line_no,
+                    "position": violation.line_pos,
+                    "context": violation.line_str if hasattr(violation, "line_str") else None
+                })
+            
+            # Return structured results
+            is_passing = len(errors) == 0
+            
+            # Only include formatted_query if it's different from input and there were errors
+            formatted_query_output = None
+            if not is_passing and formatted_query != query:
+                formatted_query_output = formatted_query
+                
+            return {
+                "status": "pass" if is_passing else "fail",
+                "errors_count": len(errors),
+                "errors": errors,
+                "formatted_query": formatted_query_output
+            }
+        finally:
+            # Clean up the temporary file
+            os.unlink(tmp_path)
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "errors_count": 1,
+            "errors": [f"Linting error: {str(e)}"],
+            "formatted_query": None
+        }
 
 
 # Run the server if executed directly

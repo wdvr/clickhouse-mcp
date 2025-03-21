@@ -39,3 +39,4 @@ jobs:
         python -m unittest tests/test_polygon_chunk.py
         python -m unittest tests/test_recursive_chunk_md.py
         python -m unittest tests/test_faiss_index.py
+        python -m unittest tests/test_clickhouse_query.py TestClickhouseLinter

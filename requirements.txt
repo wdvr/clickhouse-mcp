@@ -9,3 +9,4 @@ faiss-cpu>=1.7.4
 langchain>=0.1.0
 langchain-aws>=0.2.16
 langchain-community>=0.3.20
+sqlfluff>=2.3.0
