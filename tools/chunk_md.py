@@ -36,7 +36,21 @@ def extract_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
 
 def get_docs_dir() -> Path:
     """Get the ClickHouse docs directory path."""
-    return get_project_root() / "clickhouse" / "docs" / "en"
+    docs_path = get_project_root() / "clickhouse_docs"
+    
+    if not docs_path.exists():
+        print("ClickHouse docs not found. Running checkout script...")
+        import subprocess
+        import sys
+        
+        checkout_script = get_project_root() / "tools" / "checkout_clickhouse_docs.py"
+        result = subprocess.run([sys.executable, str(checkout_script)], check=False)
+        
+        if result.returncode != 0:
+            print("Failed to checkout ClickHouse docs. Please run tools/checkout_clickhouse_docs.py manually.")
+            sys.exit(1)
+    
+    return docs_path
 
 
 def find_headers(content: str, header_level: int) -> List[Dict[str, Any]]:
@@ -697,12 +711,12 @@ def save_chunks_to_pickle(chunks: List[Dict[str, Any]], output_file: str) -> Non
 
 def get_default_output_path() -> Path:
     """Get the default path for the output pickle file."""
-    return get_project_root() / "index" / "clickhouse_docs_chunks.pkl"
+    return get_project_root() / "src" / "clickhouse_mcp" / "index" / "clickhouse_docs_chunks.pkl"
 
 
 def get_default_docs_path() -> Path:
     """Get the default path for the documentation directory."""
-    return get_docs_dir() / "sql-reference"
+    return get_docs_dir() / "docs" / "en" / "sql-reference"
 
 
 def main():

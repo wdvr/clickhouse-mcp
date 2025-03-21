@@ -1,7 +1,6 @@
 """Vector search utilities for ClickHouse documentation."""
 
 import os
-import pickle
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 

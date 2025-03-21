@@ -1,5 +1,0 @@
-[submodule "clickhouse"]
-	path = clickhouse
-	url = https://github.com/ClickHouse/ClickHouse
-	shallow = true
-	fetchRecurseSubmodules = false
