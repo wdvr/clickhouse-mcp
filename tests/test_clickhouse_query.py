@@ -57,8 +57,9 @@ class TestClickhouseQuery(unittest.TestCase):
         # Assertions
         self.mock_client.query.assert_called_once_with("SELECT * FROM test_table")
         mock_file.assert_called_once()
-        self.assertTrue("/tmp/clickhouse_query_result_" in result)
-        self.assertTrue(result.endswith(".json"))
+        self.assertTrue("result_file" in result)
+        self.assertTrue("/tmp/clickhouse_query_result_" in result["result_file"])
+        self.assertTrue(result["result_file"].endswith(".json"))
 
     def test_run_clickhouse_query_empty_result(self):
         """Test running a query that returns no data."""
@@ -71,7 +72,9 @@ class TestClickhouseQuery(unittest.TestCase):
         result = run_clickhouse_query("SELECT * FROM empty_table")
         
         # Assertions
-        self.assertEqual(result, "No data returned from the query.")
+        # The function now returns a dictionary with result information
+        self.assertIsInstance(result, dict)
+        self.assertIsNotNone(result["result_file"])
 
     def test_get_clickhouse_schema(self):
         """Test getting a table schema."""
@@ -150,10 +153,12 @@ class TestClickhouseQuery(unittest.TestCase):
             result = run_clickhouse_query("SELECT 1 AS test")
             
             # Check that a file was created
-            self.assertTrue(os.path.exists(result))
+            self.assertIsInstance(result, dict)
+            self.assertTrue("result_file" in result)
+            self.assertTrue(os.path.exists(result["result_file"]))
             
             # Read the file content
-            with open(result, 'r') as f:
+            with open(result["result_file"], 'r') as f:
                 content = f.read()
             
             # Parse JSON and verify the response
@@ -162,7 +167,7 @@ class TestClickhouseQuery(unittest.TestCase):
             self.assertEqual(data[0][0], 1)  # First row, first column should be 1
             
             # Clean up the file
-            os.remove(result)
+            os.remove(result["result_file"])
             
         except Exception as e:
             print(f"Integration test failed: {e}")

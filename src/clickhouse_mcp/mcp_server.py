@@ -26,7 +26,6 @@ load_dotenv()  # Load environment variables from .env file
 # Import required modules for vector search
 
 
-
 # Create an MCP server
 mcp = FastMCP("PyTorch ClickHouse MCP")
 
@@ -139,11 +138,11 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
         query (str): The ClickHouse query to execute
 
     Returns:
-        str: a dict containing the result of the query as a JSON string and some statistics about the query execution
-        result['result']: The result of the query as a JSON string
+        result['result_file']: A file containing the result of the query as a JSON string
         result['time']: The time taken to execute the query
         result['rows']: The number of rows returned by the query
         result['columns']: The number of columns returned by the query
+        result['first_row']: The first row of the result set
         result['error']: An error message if the query failed
         result['hash']: The hash of the query result
 
@@ -153,10 +152,11 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
 
     if not query or not query.strip():
         return {
-            "result": None,
+            "result_file": None,
             "time": 0,
             "data": None,
             "columns": [],
+            'first_row': None,
             "error": "Error: Empty query provided",
             "hash": None
         }
@@ -166,20 +166,22 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
     except ValueError as e:
         # Handle missing environment variables
         return {
-            "result": None,
+            "result_file": None,
             "time": time.time() - start_time,
             "data": None,
             "columns": [],
+            "first_row": None,
             "error": f"Configuration error: {str(e)}",
             "hash": None
         }
     except Exception as e:
         # Handle connection errors
         return {
-            "result": None,
+            "result_file": None,
             "time": time.time() - start_time,
             "data": None,
             "columns": [],
+            "first_row": None,
             "error": f"Connection error: Failed to connect to ClickHouse server: {str(e)}",
             "hash": None
         }
@@ -192,12 +194,14 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
 
         column_names = res.column_names
         # dump to json, with converting datetime to string
+
         def datetime_serializer(obj):
             if isinstance(obj, datetime.datetime):
                 return obj.isoformat()
             raise TypeError(f"Type {type(obj)} not serializable")
-            
-        json_result = json.dumps(res.result_rows, indent=1, default=datetime_serializer)
+
+        json_result = json.dumps(
+            res.result_rows, indent=1, default=datetime_serializer)
 
         # Save to a temporary file - generate the filename to be unique
         filename = f"/tmp/clickhouse_query_result_{os.getpid()}.json"
@@ -207,39 +211,45 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
                 f.write(json_result)  # Write the JSON result to the file
         except IOError as e:
             return {
-                "result": None,
+                "result_file": None,
                 "time": end_time - start_time,
                 "data": None,
                 "columns": column_names,
+                "first_row": None,
                 "error": f"File system error: Failed to write result to file: {str(e)}",
                 "hash": None
             }
 
+        json_data = json.loads(json_result)
+
         # Return the file path
         return {
-            "result": json_result,
+            "result_file": filename,
             "time": end_time - start_time,
             "data": len(json_result),
             "columns": column_names,
+            "first_row": json_data[0] if json_data and len(json_data) else None,
             "error": error,
             "hash": hashlib.sha256(json_result.encode()).hexdigest()
         }
 
     except clickhouse_connect.driver.exceptions.ClickHouseError as e:
         return {
-            "result": None,
+            "result_file": None,
             "time": time.time() - start_time,
             "data": None,
             "columns": [],
+            "first_row": None,
             "error": f"Query error: {str(e)}",
             "hash": None
         }
     except Exception as e:
         return {
-            "result": None,
+            "result_file": None,
             "time": time.time() - start_time,
             "data": None,
             "columns": [],
+            "first_row": None,
             "error": f"Unexpected error during query execution: {str(e)}",
             "hash": None
         }
