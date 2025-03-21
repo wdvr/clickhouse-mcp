@@ -21,8 +21,8 @@ from unittest import skipUnless
 # Add the parent directory to sys.path to allow importing the module
 sys.path.append(str(Path(__file__).parent.parent))
 from src.clickhouse_mcp.docs_search import load_chunks
+from src.clickhouse_mcp.vector_search import create_faiss_index, load_faiss_index, vector_search
 from src.clickhouse_mcp import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
-from tools.create_faiss_index import create_faiss_index
 
 class TestFaissIndex(unittest.TestCase):
     
@@ -32,7 +32,6 @@ class TestFaissIndex(unittest.TestCase):
         """Test creating a FAISS index with a very limited number of chunks."""
         try:
             from langchain_aws import BedrockEmbeddings
-            from langchain.vectorstores import FAISS
         except ImportError:
             self.skipTest("Required packages not installed: langchain_aws, faiss-cpu, langchain")
             
@@ -45,13 +44,17 @@ class TestFaissIndex(unittest.TestCase):
         if os.path.exists(test_index_path):
             shutil.rmtree(test_index_path)
         
+        # Initialize Bedrock Embeddings
+        embeddings = BedrockEmbeddings(
+            region_name=DEFAULT_REGION,
+            model_id=DEFAULT_BEDROCK_MODEL
+        )
+        
         # Create the index
         create_faiss_index(
             chunks=test_chunks,
             output_path=test_index_path,
-            limit=3,
-            model_id=DEFAULT_BEDROCK_MODEL,
-            region_name=DEFAULT_REGION
+            embeddings=embeddings
         )
         
         # Check that the index was created
@@ -60,13 +63,8 @@ class TestFaissIndex(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(test_index_path, "index.pkl")))
         
         # Test loading and searching the index
-        embeddings = BedrockEmbeddings(
-            region_name=DEFAULT_REGION,
-            model_id=DEFAULT_BEDROCK_MODEL
-        )
-        
-        vector_store = FAISS.load_local(test_index_path, embeddings)
-        results = vector_store.similarity_search("test query", k=1)
+        vector_store = load_faiss_index(test_index_path, embeddings)
+        results = vector_search(vector_store, "test query", 1)
         
         # Check that we got a result
         self.assertEqual(len(results), 1)

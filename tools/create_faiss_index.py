@@ -17,7 +17,7 @@ Requirements:
 
 Usage:
     # Create full index
-    python create_faiss_index.py --output ./index/faiss_index
+    python create_faiss_index.py
 
     # Test mode with limited documents (using num_results to set limit)
     python create_faiss_index.py --test -n 10 --output ./index/test_faiss_index
@@ -45,64 +45,8 @@ from src.clickhouse_mcp.docs_search import (
     simple_search,
     get_default_pickle_path
 )
+from src.clickhouse_mcp.vector_search import create_faiss_index, get_default_index_path
 from src.clickhouse_mcp import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
-
-def create_faiss_index(
-    chunks: List[Dict[str, Any]], 
-    output_path: str,
-    model_id: str = DEFAULT_BEDROCK_MODEL,
-    region_name: str = DEFAULT_REGION,
-    num_results: int = 10  # Kept for backward compatibility
-) -> None:
-    """Create a FAISS index from document chunks.
-    
-    Args:
-        chunks: List of document chunks to embed and index.
-        output_path: Path where to save the FAISS index.
-        model_id: Bedrock model ID for embeddings.
-        region_name: AWS region name.
-        num_results: Kept for backward compatibility.
-    """
-    # Import required packages for vector embeddings
-    try:
-        from langchain_aws import BedrockEmbeddings
-        from langchain.vectorstores import FAISS
-        from langchain.schema import Document
-    except ImportError:
-        print("Required packages not found. Install with:")
-        print("pip install langchain-aws faiss-cpu langchain langchain-community")
-        raise
-    
-    # Initialize Bedrock Embeddings
-    try:
-        embeddings = BedrockEmbeddings(
-            region_name=region_name,
-            model_id=model_id
-        )
-    except Exception as e:
-        print(f"Error initializing Bedrock embeddings: {e}")
-        print("Make sure AWS credentials are properly set with Bedrock access.")
-        print("Required environment variables: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
-        raise
-    
-    # Convert to langchain Documents
-    documents = []
-    for chunk in chunks:
-        doc = Document(
-            page_content=chunk['content'],
-            metadata=chunk['metadata']
-        )
-        documents.append(doc)
-    
-    print(f"Creating FAISS index with {len(documents)} documents...")
-    print(f"Using embedding model: {model_id}")
-    
-    # Create the FAISS index
-    vector_store = FAISS.from_documents(documents, embeddings)
-    
-    # Save the FAISS index
-    vector_store.save_local(output_path)
-    print(f"FAISS index saved to {output_path}")
 
 
 def print_chunk_preview(chunk, index, preview_length=200):
@@ -130,10 +74,12 @@ def print_chunk_preview(chunk, index, preview_length=200):
 def main():
     parser = argparse.ArgumentParser(description='Create FAISS index from document chunks')
     default_pickle = str(get_default_pickle_path())
+    default_index_path = str(get_default_index_path())
+    
     parser.add_argument('--pickle', type=str, 
                         help=f'Path to the pickle file containing document chunks (default: {default_pickle})')
-    parser.add_argument('--output', type=str, default='./faiss_index',
-                        help='Path where to save the FAISS index')
+    parser.add_argument('--output', type=str, default=default_index_path,
+                        help=f'Path where to save the FAISS index (default: {default_index_path})')
     parser.add_argument('--test', action='store_true',
                         help='Run in test mode with limited number of documents')
     parser.add_argument('--query', type=str,
@@ -185,28 +131,47 @@ def main():
         
         return
     
-    # Ensure output directory exists for FAISS index
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    # Import required packages for vector embeddings
+    try:
+        from langchain_aws import BedrockEmbeddings
+    except ImportError:
+        print("Required packages not found. Install with:")
+        print("pip install langchain-aws faiss-cpu langchain langchain-community")
+        raise
+    
+    # Initialize Bedrock Embeddings
+    try:
+        embeddings = BedrockEmbeddings(
+            region_name=args.region,
+            model_id=args.model
+        )
+    except Exception as e:
+        print(f"Error initializing Bedrock embeddings: {e}")
+        print("Make sure AWS credentials are properly set with Bedrock access.")
+        print("Required environment variables: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
+        raise
+    
+    print(f"Using embedding model: {args.model}")
     
     # Create the FAISS index with the processed chunks
     create_faiss_index(
         chunks=docs_to_process,
         output_path=args.output,
-        num_results=args.num_results,  # Only used if create_faiss_index needs to filter further
-        model_id=args.model,
-        region_name=args.region
+        embeddings=embeddings
     )
     
     # Example usage of the created index
     print("\nExample usage of the created FAISS index:")
     print("```python")
     print("from langchain_aws import BedrockEmbeddings")
-    print("from langchain.vectorstores import FAISS")
+    print("from src.clickhouse_mcp.vector_search import load_faiss_index, vector_search")
+    print("")
     print("# Load the index")
     print(f"embeddings = BedrockEmbeddings(region_name='{args.region}', model_id='{args.model}')")
-    print(f"vector_store = FAISS.load_local('{args.output}', embeddings)")
+    print(f"vector_store = load_faiss_index('{args.output}', embeddings)")
+    print("")
     print("# Search the index")
-    print("results = vector_store.similarity_search('how to create a table in ClickHouse', k=3)")
+    print("results = vector_search(vector_store, 'how to create a table in ClickHouse', 3)")
     print("for doc in results:")
     print("    print(doc.metadata['document_title'])")
     print("    print(doc.metadata['section_title'])")

@@ -1,97 +1,65 @@
-# ClickHouse MCP
+# ClickHouse MCP - Documentation Processing
 
-A Python module for ClickHouse MCP server integration and documentation search.
+This project provides tools for processing ClickHouse documentation, focusing on chunking markdown documents for embedding and search.
 
-## Setup
+## Documentation Chunking
 
-1. Create and activate the virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+The project includes two chunking implementations:
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. **Original Chunking (`tools/chunk_md.py`)**
+   - Splits markdown by H1, H2, and H3 headers
+   - Does not control chunk sizes
+   - Creates both very small (< 100 chars) and very large (> 100K chars) chunks
 
-3. Install the package in development mode:
-   ```bash
-   pip install -e .
-   ```
+2. **Improved Chunking (`tools/chunk_md_improved.py`)**
+   - Target chunk size: ~10,000 characters 
+   - Maximum chunk size: 40,000 characters
+   - Keeps small documents (≤15,000 chars) as single chunks
+   - Chunks by H2 sections by default
+   - Merges small sections (<1,000 chars)
+   - Implements force chunking for oversized sections
+   - Generates unique keys for all chunks
 
 ## Usage
 
-### 1. Query Documentation
-
-Query ClickHouse documentation chunks using simple keyword search:
+### Running Chunking
 
 ```bash
-python tools/query_docs.py --query "CREATE TABLE" --num-results 3
+python tools/chunk_md.py --save
 ```
 
-Sample random chunks from the documentation:
+
+### Analyzing Chunk Size Distribution
 
 ```bash
-python tools/query_docs.py --sample 5
+python analyze_index_with_histogram.py
 ```
 
-### 2. Create FAISS Index
+## Testing
 
-Create a FAISS vector index from document chunks using AWS Bedrock embeddings:
+Run unit tests for the improved chunking implementation:
 
 ```bash
-# Create full index
-python tools/create_faiss_index.py --output ./index/faiss_index
-
-# Test mode with limited documents
-python tools/create_faiss_index.py --test --output ./index/test_faiss_index
-
-# Test mode with query filtering
-python tools/create_faiss_index.py --test --query "table creation" --output ./index/test_faiss_index
-
-# Use a different Bedrock model or region
-python tools/create_faiss_index.py --model "amazon.titan-embed-text-v1" --region "us-west-2"
+python -m unittest tests/test_chunk_md_improved.py
 ```
 
-Requirements:
-- AWS credentials with Bedrock access (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)
-- Required packages: langchain-aws, faiss-cpu, langchain
+## Project Structure
 
-### 3. MCP Server
+- `tools/`: Chunking and processing tools
+  - `chunk_md.py`: Original chunking implementation
+  - `chunk_md_improved.py`: Improved chunking implementation
+  - `query_docs.py`: Tool for querying the document index
+- `tests/`: Unit tests
+  - `test_chunk_md.py`: Tests for original chunking
+  - `test_chunk_md_improved.py`: Tests for improved chunking
+- `analyze_index.py`: Basic chunk size analysis
+- `analyze_index_with_histogram.py`: Detailed analysis with histogram
+- `run_improved_chunking.py`: Tool to compare chunking implementations
 
-Run the MCP server:
+## Installation
 
-```bash
-python -m src.clickhouse_mcp
-```
-
-Inspect the MCP server:
-```bash
-npx @modelcontextprotocol/inspector python -m clickhouse_mcp
-```
-
-## Development
-
-### Code Quality
-
-Run type checking with mypy:
-```bash
-mypy src tests
-```
-
-Run linting with ruff:
-```bash
-ruff check src tests
-```
-
-### Running Tests
-
-Execute the test suite:
-```bash
-# Run all tests (excluding the clickhouse and venv directories)
-python run_tests.py
-
-# Or using unittest directly (only looks in tests directory)
-python -m unittest discover tests
-```
+1. Clone the repository
+2. Install requirements:
+   ```bash
+   pip install -r requirements.txt
+   ```
