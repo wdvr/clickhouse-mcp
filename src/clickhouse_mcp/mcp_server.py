@@ -1,3 +1,6 @@
+import clickhouse_connect.driver.ctypes
+import clickhouse_connect.driver.types
+import clickhouse_connect.driverc
 from . import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
 from .vector_search import load_faiss_index, vector_search, get_default_index_path
 from langchain_community.vectorstores import FAISS
@@ -5,6 +8,7 @@ from langchain_aws import BedrockEmbeddings
 import hashlib
 import clickhouse_connect
 import json
+import datetime
 from typing import Optional, Any, Dict, List
 import clickhouse_connect.common
 import clickhouse_connect.driver
@@ -37,14 +41,37 @@ def get_clickhouse_client() -> clickhouse_connect.driver.client.Client:
 
     Returns:
         clickhouse_connect.Client: The ClickHouse client.
+
+    Raises:
+        ValueError: If any required environment variables are missing
+        Exception: If connection to ClickHouse fails
     """
     global clickhouse_client
     if clickhouse_client is None:
+        # Check for required environment variables
+        host = os.getenv("CLICKHOUSE_HOST")
+        port = os.getenv("CLICKHOUSE_PORT")
+        username = os.getenv("CLICKHOUSE_USER")
+        password = os.getenv("CLICKHOUSE_PASSWORD")
+
+        if not all([host, port, username, password]):
+            missing = []
+            if not host:
+                missing.append("CLICKHOUSE_HOST")
+            if not port:
+                missing.append("CLICKHOUSE_PORT")
+            if not username:
+                missing.append("CLICKHOUSE_USER")
+            if not password:
+                missing.append("CLICKHOUSE_PASSWORD")
+            raise ValueError(
+                f"Missing required environment variables: {', '.join(missing)}")
+
         clickhouse_client = clickhouse_connect.get_client(
-            host=os.getenv("CLICKHOUSE_HOST"),
-            port=os.getenv("CLICKHOUSE_PORT"),
-            username=os.getenv("CLICKHOUSE_USER"),
-            password=os.getenv("CLICKHOUSE_PASSWORD"),
+            host=host,
+            port=port,
+            username=username,
+            password=password,
             database="default",
             secure=True
         )
@@ -95,10 +122,11 @@ def readme_howto_use_clickhouse_tools() -> str:
 
         This tool allows you to run queries, explain queries, and get the schema of the ClickHouse database.
 
-        To run a query, use the `run_clickhouse_query` tool with a valid ClickHouse query string.
+        To run a query, use the `run_clickhouse_query` tool with a valid ClickHouse query string. Note that the query can't have a ; at the end.
         To get the schema of a table, use the `get_clickhouse_schema` tool with the table name.
         To explain a query, use the `explain_clickhouse_query` tool with a valid ClickHouse query string.
         To get the list of tables, use the `get_clickhouse_tables` tool.
+        Use semantic_search_docs to search specific clickhouse functions and syntax in case of doubt or syntax errors.
 
         Use this to create and run queries if user asks things like: 'how long does the average macos build job take?'
         """)
@@ -120,22 +148,90 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
         result['hash']: The hash of the query result
 
     """
-
-    client = get_clickhouse_client()
-    print("got the client")
-
     start_time = time.time()  # Start timing the query execution
     error = None
+
+    if not query or not query.strip():
+        return {
+            "result": None,
+            "time": 0,
+            "data": None,
+            "columns": [],
+            "error": "Error: Empty query provided",
+            "hash": None
+        }
+
     try:
+        client = get_clickhouse_client()
+    except ValueError as e:
+        # Handle missing environment variables
+        return {
+            "result": None,
+            "time": time.time() - start_time,
+            "data": None,
+            "columns": [],
+            "error": f"Configuration error: {str(e)}",
+            "hash": None
+        }
+    except Exception as e:
+        # Handle connection errors
+        return {
+            "result": None,
+            "time": time.time() - start_time,
+            "data": None,
+            "columns": [],
+            "error": f"Connection error: Failed to connect to ClickHouse server: {str(e)}",
+            "hash": None
+        }
+
+    try:
+        query = query.replace("\\n", "\n").strip()
         res: Optional[clickhouse_connect.driver.query.QueryResult] = client.query(
             query)
+        end_time = time.time()  # End timing the query execution
+
+        column_names = res.column_names
+        # dump to json, with converting datetime to string
+        def datetime_serializer(obj):
+            if isinstance(obj, datetime.datetime):
+                return obj.isoformat()
+            raise TypeError(f"Type {type(obj)} not serializable")
+            
+        json_result = json.dumps(res.result_rows, indent=1, default=datetime_serializer)
+
+        # Save to a temporary file - generate the filename to be unique
+        filename = f"/tmp/clickhouse_query_result_{os.getpid()}.json"
+
+        try:
+            with open(filename, "w") as f:
+                f.write(json_result)  # Write the JSON result to the file
+        except IOError as e:
+            return {
+                "result": None,
+                "time": end_time - start_time,
+                "data": None,
+                "columns": column_names,
+                "error": f"File system error: Failed to write result to file: {str(e)}",
+                "hash": None
+            }
+
+        # Return the file path
+        return {
+            "result": json_result,
+            "time": end_time - start_time,
+            "data": len(json_result),
+            "columns": column_names,
+            "error": error,
+            "hash": hashlib.sha256(json_result.encode()).hexdigest()
+        }
+
     except clickhouse_connect.driver.exceptions.ClickHouseError as e:
         return {
             "result": None,
             "time": time.time() - start_time,
             "data": None,
             "columns": [],
-            "error": f"Error running query: {e}",
+            "error": f"Query error: {str(e)}",
             "hash": None
         }
     except Exception as e:
@@ -144,35 +240,9 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
             "time": time.time() - start_time,
             "data": None,
             "columns": [],
-            "error": f"Unexpected error: {e}",
+            "error": f"Unexpected error during query execution: {str(e)}",
             "hash": None
         }
-    end_time = time.time()  # End timing the query execution
-    # res_rows = res.result_rows if res is not None else []
-    # res_columns = res.result_columns if res is not None else []
-
-    column_names = res.column_names
-    json_result = json.dumps(
-        res.result_rows, indent=1
-    )
-
-    # Save to a temporary file - generate the filename to be unique
-    filename = f"/tmp/clickhouse_query_result_{os.getpid()}.json"
-
-    try:
-        with open(filename, "w") as f:
-            f.write(json_result)  # Write the JSON result to the file
-    except IOError as e:
-        return f"Error: Failed to write result to file. {e}"
-    # Return the file path
-    return {
-        "result": json_result,
-        "time": end_time - start_time,
-        "data": len(json_result),
-        "columns": column_names,
-        "error": error,
-        "hash": hashlib.sha256(json_result.encode()).hexdigest()
-    }
 
 
 @mcp.tool()
@@ -312,7 +382,8 @@ def get_query_by_name(query_name: str, include_params: Optional[bool] = False) -
 
     try:
         query = requests.get(query_url).text
-        query = query.replace("\n", " ").strip()
+        # Fix literal '\n' character sequences (2 chars) with actual newlines
+        query = query.replace("\\n", "\n").strip()
         result_json["query"] = query
     except Exception as e:
         result_json["error"] = f"Error: Failed to get query from {query_url}. {e}"
