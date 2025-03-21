@@ -1,2 +1,3 @@
 include src/clickhouse_mcp/index/*
 recursive-include index *
+prune clickhouse
