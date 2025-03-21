@@ -34,9 +34,4 @@ jobs:
       - name: Run non-secret tests
         run: |
           source venv/bin/activate
-          # Run individual test files that don't require secrets
-          python -m unittest tests/test_chunk_md.py
-          python -m unittest tests/test_polygon_chunk.py
-          python -m unittest tests/test_recursive_chunk_md.py
-          python -m unittest tests/test_faiss_index.py
-          python -m unittest tests/test_clickhouse_query.py TestClickhouseLinter
+          python run_tests.py
