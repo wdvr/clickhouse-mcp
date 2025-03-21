@@ -1,26 +1,28 @@
 """ClickHouse documentation search utilities."""
 
-import os
-import random
 import pickle
+import random
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 
+
+def get_package_root() -> Path:
+    """Get the package root directory (where the module is installed)."""
+    return Path(__file__).resolve().parent
 
 def get_project_root() -> Path:
     """Get the project root directory."""
-    file_path = Path(__file__).resolve()
-    # Find the git root (project root)
-    for parent in [file_path] + list(file_path.parents):
-        if (parent / '.git').exists():
-            return parent
-        # If we find src/clickhouse_mcp, we're in the project
-        if parent.name == 'clickhouse_mcp' and (parent.parent.name == 'src'):
-            return parent.parent.parent
-    raise FileNotFoundError("Project root not found.")
+    # This function is kept for backward compatibility
+    return get_package_root().parent.parent
 
 def get_default_pickle_path() -> Path:
     """Get the default path to the pickle file containing document chunks."""
+    # First try package data directory
+    package_path = get_package_root() / "index" / "clickhouse_docs_chunks.pkl"
+    if package_path.exists():
+        return package_path
+        
+    # Fall back to project root (development mode)
     return get_project_root() / "index" / "clickhouse_docs_chunks.pkl"
 
 

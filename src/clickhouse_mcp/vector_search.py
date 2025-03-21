@@ -8,12 +8,19 @@ from typing import List, Dict, Any, Optional
 from langchain.schema import Document
 from langchain_community.vectorstores import FAISS
 
-from .docs_search import get_project_root
+from .docs_search import get_project_root, get_package_root
 
 
 def get_default_index_path() -> Path:
     """Get the default path to the FAISS index."""
-    return get_project_root() / "index"
+    # First try package data directory
+    package_path = get_package_root() / "index"
+    if package_path.exists() and (package_path / "index.faiss").exists():
+        return package_path
+        
+    # Fall back to project root (development mode)
+    project_path = get_project_root() / "index"
+    return project_path
 
 
 def create_faiss_index(

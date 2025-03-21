@@ -2,7 +2,6 @@ from . import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
 from .vector_search import load_faiss_index, vector_search, get_default_index_path
 from langchain_community.vectorstores import FAISS
 from langchain_aws import BedrockEmbeddings
-from langchain.schema import Document
 import hashlib
 import clickhouse_connect
 import json
@@ -14,7 +13,6 @@ import clickhouse_connect.driver.exceptions
 import clickhouse_connect.driver.query
 from mcp.server.fastmcp import FastMCP, Context
 import os
-import sys
 import time
 import requests
 
@@ -22,6 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 
 # Import required modules for vector search
+
 
 
 # Create an MCP server

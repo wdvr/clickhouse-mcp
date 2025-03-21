@@ -1,39 +1,54 @@
-# ClickHouse MCP - Documentation Processing
+# ClickHouse MCP
 
-This project provides tools for processing ClickHouse documentation, focusing on chunking markdown documents for embedding and search.
-
-## Documentation Chunking
-
-The project includes two chunking implementations:
-
-1. **Original Chunking (`tools/chunk_md.py`)**
-   - Splits markdown by H1, H2, and H3 headers
-   - Does not control chunk sizes
-   - Creates both very small (< 100 chars) and very large (> 100K chars) chunks
-
-2. **Improved Chunking (`tools/chunk_md_improved.py`)**
-   - Target chunk size: ~10,000 characters 
-   - Maximum chunk size: 40,000 characters
-   - Keeps small documents (≤15,000 chars) as single chunks
-   - Chunks by H2 sections by default
-   - Merges small sections (<1,000 chars)
-   - Implements force chunking for oversized sections
-   - Generates unique keys for all chunks
+This project provides [MCP](https://modelcontextprotocol.io/) server for ClickHouse, including MCP tools to read the
+ClickHouse database schema, explain queries, and perform semantic search over the ClickHouse documentation.
 
 ## Usage
 
-### Running Chunking
+### 1. Installing
+
+This package can be installed directly from GitHub using pip:
 
 ```bash
-python tools/chunk_md.py --save
+pip install -e git+https://github.com/izaitsevfb/clickhouse-mcp.git#egg=clickhouse_mcp
 ```
 
+(Once installed, you can run the MCP server from anywhere: `python -m clickhouse_mcp`)
 
-### Analyzing Chunk Size Distribution
 
-```bash
-python analyze_index_with_histogram.py
-```
+
+### 2. Integration with Claude Code
+
+1. Install the package
+2. Put the [.mcp.json](https://github.com/izaitsevfb/clickhouse-mcp/blob/main/.mcp.json) file in
+   directory where Claude Code is running. Alternatively, add `python -m clickhouse_mcp` with `claude mcp add`
+
+
+### 3. Running
+
+Add `.env` file in the directory where you're running claude code or export required environment variables
+for the session. 
+
+See [`.env.example`](.env.example) for the list of required variables related to the ClickHouse database.
+
+AWS credentials must also be set: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` 
+for semantic search to work.
+
+
+
+# Development
+
+## Development Installation
+
+1. Clone the repository
+2. Install requirements:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Install in development mode:
+   ```bash
+   pip install -e .
+   ```
 
 ## Testing
 
@@ -43,53 +58,34 @@ Run unit tests for the improved chunking implementation:
 python -m unittest tests/test_chunk_md_improved.py
 ```
 
-## Project Structure
+# Tools
+
+## Running Chunking
+
+```bash
+python tools/chunk_md.py --save
+```
+
+## Analyzing Chunk Size Distribution (after chunking is done)
+
+```bash
+python analyze_index_with_histogram.py
+```
+
+See the [Tools README](tools/README.md) for more details.
+
+# Project Structure
 
 - `tools/`: Chunking and processing tools
-  - `chunk_md.py`: Original chunking implementation
-  - `chunk_md_improved.py`: Improved chunking implementation
-  - `query_docs.py`: Tool for querying the document index
+    - `chunk_md.py`: Original chunking implementation
+    - `chunk_md_improved.py`: Improved chunking implementation
+    - `query_docs.py`: Tool for querying the document index
 - `tests/`: Unit tests
-  - `test_chunk_md.py`: Tests for original chunking
-  - `test_chunk_md_improved.py`: Tests for improved chunking
+    - `test_chunk_md.py`: Tests for original chunking
+    - `test_chunk_md_improved.py`: Tests for improved chunking
 - `analyze_index.py`: Basic chunk size analysis
 - `analyze_index_with_histogram.py`: Detailed analysis with histogram
 - `run_improved_chunking.py`: Tool to compare chunking implementations
+- `index/`: Contains the FAISS index and document chunks for vector search
+- `src/clickhouse_mcp/`: The main package module
 
-## Installation
-
-1. Clone the repository
-2. Install requirements:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## MCP Server
-
-This project includes an MCP (Model Control Protocol) server with tools for ClickHouse database interaction and documentation search:
-
-### Starting the Server
-
-```bash
-python -m src.clickhouse_mcp.mcp_server
-```
-
-### MCP Tools
-
-1. **ClickHouse Database Tools**
-   - `run_clickhouse_query`: Run ClickHouse queries
-   - `get_clickhouse_schema`: Get schema for a table
-   - `explain_clickhouse_query`: Explain query execution
-   - `get_clickhouse_tables`: List available tables
-
-2. **Documentation Search**
-   - `semantic_search_docs`: Semantic search over ClickHouse documentation
-     - Parameters:
-       - `query`: Search query text
-       - `page`: Page number (default: 1) 
-       - `per_page`: Results per page (default: 3)
-       - `limit`: Max content length (default: 300)
-     - Uses a singleton pattern for efficient index loading
-     - Returns clear, readable text output with document information and content
-
-See the [Tools README](tools/README.md) for more details.
