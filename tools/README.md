@@ -2,6 +2,34 @@
 
 This directory contains tools for processing and working with ClickHouse documentation.
 
+## MCP Tools
+
+### MCP Server: `src/clickhouse_mcp/mcp_server.py` 
+
+The MCP server provides tools for interacting with ClickHouse data and documentation:
+
+```bash
+# Start the MCP server
+python -m clickhouse_mcp.mcp_server
+```
+
+Available MCP tools:
+
+1. **ClickHouse Database Tools**
+   - `run_clickhouse_query`: Run ClickHouse queries and return results
+   - `get_clickhouse_schema`: Get schema information for a table
+   - `explain_clickhouse_query`: Get query explanation
+   - `get_clickhouse_tables`: List available tables
+
+2. **Documentation Search**
+   - `semantic_search_docs`: Perform semantic search over ClickHouse documentation
+     - Parameters:
+       - `query`: Search query text
+       - `page`: Page number (default: 1)
+       - `per_page`: Results per page (default: 3)
+       - `limit`: Max character length for result content (default: 300)
+     - Returns plain text with markdown results and clear section delimiters
+
 ## Chunking Tools
 
 ### Original Chunking: `chunk_md.py`

@@ -63,3 +63,33 @@ python -m unittest tests/test_chunk_md_improved.py
    ```bash
    pip install -r requirements.txt
    ```
+
+## MCP Server
+
+This project includes an MCP (Model Control Protocol) server with tools for ClickHouse database interaction and documentation search:
+
+### Starting the Server
+
+```bash
+python -m src.clickhouse_mcp.mcp_server
+```
+
+### MCP Tools
+
+1. **ClickHouse Database Tools**
+   - `run_clickhouse_query`: Run ClickHouse queries
+   - `get_clickhouse_schema`: Get schema for a table
+   - `explain_clickhouse_query`: Explain query execution
+   - `get_clickhouse_tables`: List available tables
+
+2. **Documentation Search**
+   - `semantic_search_docs`: Semantic search over ClickHouse documentation
+     - Parameters:
+       - `query`: Search query text
+       - `page`: Page number (default: 1) 
+       - `per_page`: Results per page (default: 3)
+       - `limit`: Max content length (default: 300)
+     - Uses a singleton pattern for efficient index loading
+     - Returns clear, readable text output with document information and content
+
+See the [Tools README](tools/README.md) for more details.

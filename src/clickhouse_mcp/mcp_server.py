@@ -1,6 +1,6 @@
 import clickhouse_connect
 import json
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 import clickhouse_connect.common
 import clickhouse_connect.driver
 import clickhouse_connect.driver.client
@@ -11,6 +11,13 @@ import sys
 
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
+
+# Import required modules for vector search
+from langchain.schema import Document
+from langchain_aws import BedrockEmbeddings
+from langchain_community.vectorstores import FAISS
+from .vector_search import load_faiss_index, vector_search, get_default_index_path
+from . import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
 
 
 # Create an MCP server
@@ -188,6 +195,101 @@ def get_clickhouse_tables() -> str:
         return json_result
     except Exception as e:
         return f"Error: {e}"
+
+
+# Vector store singleton
+vector_store_instance: Optional[FAISS] = None
+
+def get_vector_store() -> FAISS:
+    """Get or initialize the vector store singleton.
+    
+    Returns:
+        FAISS: The loaded vector store
+    """
+    global vector_store_instance
+    
+    if vector_store_instance is None:
+        # Initialize embeddings
+        embeddings = BedrockEmbeddings(
+            region_name=DEFAULT_REGION,
+            model_id=DEFAULT_BEDROCK_MODEL
+        )
+        
+        # Load the FAISS index
+        index_path = get_default_index_path()
+        vector_store_instance = load_faiss_index(index_path, embeddings)
+        
+    return vector_store_instance
+
+
+@mcp.tool()
+def semantic_search_docs(
+    query: str,
+    page: int = 1,
+    per_page: int = 3,
+    limit: int = 300
+) -> str:
+    """Performs semantic search over ClickHouse documentation.
+    
+    Args:
+        query: The search query text
+        page: Page number (starting from 1)
+        per_page: Number of results per page
+        limit: Maximum character length for each result's content
+        
+    Returns:
+        The formatted search results with markdown content
+    """
+    try:
+        # Get the vector store singleton
+        vector_store = get_vector_store()
+        
+        # Calculate pagination offsets
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        
+        # We need to fetch enough results to cover the requested page
+        num_results = end_idx
+        
+        # Perform the semantic search
+        search_results = vector_search(vector_store, query, num_results)
+        
+        # Apply pagination
+        paginated_results = search_results[start_idx:end_idx]
+        
+        # Prepare result text with clear delimiters
+        results_text = f"Search results for: '{query}'\n\n"
+        results_text += f"Page {page} of {(len(search_results) + per_page - 1) // per_page} " 
+        results_text += f"({len(search_results)} total results)\n\n"
+        
+        # Format each result with delimiters
+        for i, result in enumerate(paginated_results):
+            results_text += f"==== RESULT {i+1} ====\n"
+            results_text += f"DOCUMENT: {result.metadata.get('document_title', 'Unknown')}\n"
+            results_text += f"SECTION: {result.metadata.get('section_title', 'Unknown')}\n"
+            results_text += f"SOURCE: {result.metadata.get('path', 'Unknown')}\n"
+            results_text += "CONTENT:\n"
+            
+            # Include content with truncation if needed
+            content = result.page_content
+            if limit and len(content) > limit:
+                content = content[:limit] + "...(truncated)"
+                
+            results_text += content + "\n"
+            results_text += "==================\n\n"
+        
+        # Add pagination instructions
+        if page > 1:
+            results_text += "For previous results: Use page=" + str(page-1) + "\n"
+        if page < (len(search_results) + per_page - 1) // per_page:
+            results_text += "For more results: Use page=" + str(page+1) + "\n"
+            
+        return results_text
+        
+    except FileNotFoundError:
+        return "ERROR: FAISS index not found. Please make sure the index has been created."
+    except Exception as e:
+        return f"ERROR: Search failed: {str(e)}"
 
 
 # Run the server if executed directly
