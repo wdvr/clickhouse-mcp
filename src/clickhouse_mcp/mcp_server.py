@@ -36,6 +36,44 @@ clickhouse_client: Optional[clickhouse_connect.driver.client.Client] = None
 # Maximum response size in bytes - set to a conservative size for context window efficiency
 MAX_RESPONSE_SIZE = 10 * 1024  # 10KB
 
+# datetime serializer for JSON
+
+
+def datetime_serializer(obj):
+    if isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
+def clickhouse_response_to_json(res: clickhouse_connect.driver.query.QueryResult) -> str:
+    """Convert ClickHouse query result to JSON string.
+
+    Args:
+        res (clickhouse_connect.driver.query.QueryResult): The ClickHouse query result
+
+    Returns:
+        str: The JSON string representation of the query result
+    """
+    if res is None or res.result_rows is None:
+        return "No data returned from the query."
+
+    res = {"column_names": res.column_names, "result_rows": res.result_rows}
+
+
+def get_clean_error_string(clickhouse_error_msg: str) -> str:
+    """Clean the ClickHouse error message for better readability.
+
+    Args:
+        clickhouse_error_msg (str): The raw ClickHouse error message
+
+    Returns:
+        str: The cleaned error message
+    """
+    # Remove unnecessary details from the error message - everything before "received ClickHouse error"
+    if not "received ClickHouse error" in clickhouse_error_msg:
+        return clickhouse_error_msg
+    return "Clickhouse error " + clickhouse_error_msg.split("received ClickHouse error")[-1].strip()
+
 
 def get_clickhouse_client() -> clickhouse_connect.driver.client.Client:
     """Get the ClickHouse client instance.
@@ -198,13 +236,8 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
         column_names = res.column_names
         # dump to json, with converting datetime to string
 
-        def datetime_serializer(obj):
-            if isinstance(obj, datetime.datetime):
-                return obj.isoformat()
-            raise TypeError(f"Type {type(obj)} not serializable")
-
         json_result = json.dumps(
-            res.result_rows, indent=1, default=datetime_serializer)
+            res.result_rows, indent=2, default=datetime_serializer)
 
         # Save to a temporary file - generate the filename to be unique
         filename = f"/tmp/clickhouse_query_result_{os.getpid()}.json"
@@ -281,15 +314,22 @@ def get_clickhouse_schema(table_name: str) -> str:
 
 
 @mcp.tool()
-def get_slow_queries(last_x_hours: int) -> str:
-    """Get the list of slow queries from the ClickHouse system table.
-
+def get_query_execution_stats(last_x_hours: int, limit: int = 10, query_name: Optional[str] = None) -> str:
+    """Get the list of queries with their execution timings from the ClickHouse system table.
+    Args:
+        last_x_hours (int): The number of hours to look back for slow queries
+        query_name (Optional[str]): Optional filter for specific query names
+        limit (int): The maximum number of slow queries to return
     Returns:
         str: The name of the file containing the slow queries as a JSON string
     """
+    query_name_filter = ""
+    if query_name:
+        # Ensure the query_id is sanitized to prevent SQL injection
+        query_name_filter = f"AND query_id LIKE '%{
+            query_name}%'"
 
-    QUERY = """
-    SELECT * FROM (
+    QUERY = f"""
     SELECT
         round(avg(query_duration_ms)) AS realTimeMSAvg,
         sum(query_duration_ms) as realTimeMSTotal,
@@ -308,11 +348,13 @@ def get_slow_queries(last_x_hours: int) -> str:
         AND length(query_id) > 37
         AND type = 'QueryFinish'
         AND left(query_id, -37) != 'adhoc'
+        {query_name_filter}
     GROUP BY
         name
-    ) WHERE
-    realTimeMSAvg > 1000
-    ORDER BY num DESC
+    ORDER BY 
+        realTimeMSAvg DESC
+    LIMIT 
+        {limit}
     """
 
     client = get_clickhouse_client()
@@ -321,17 +363,8 @@ def get_slow_queries(last_x_hours: int) -> str:
         if res is None or res.result_rows is None or len(res.result_rows) == 0:
             return "No data returned from the query."
         # Find top 5 slowest
-        slowest_queries = sorted(
-            res.result_rows, key=lambda x: x[0], reverse=True)[:5]
-        filename = f"/tmp/clickhouse_slow_queries_{time.time()}.json"
-        json_result = json.dumps(res.result_rows, indent=2)
-        with open(filename, "w") as f:
-            f.write(json_result)
-        return {
-            "result_file": filename,
-            "top_5_called": [{"name": r[-1], "avg_dur": r[0], "num_calls": r[-2]} for r in res.result_rows[:5]],
-            "top_5_slowest": [{"name": r[-1], "avg_dur": r[0], "num_calls": r[-2]} for r in slowest_queries]
-        }
+
+        return safe_json_dumps(res.result_rows, indent=2)
     except clickhouse_connect.driver.exceptions.ClickHouseError as e:
         return f"Clickhouse query error: {e}"
     except Exception as e:
@@ -380,13 +413,15 @@ def get_clickhouse_tables() -> str:
 
 
 @mcp.tool()
-def get_query_by_name(query_name: str, include_params: Optional[bool] = False) -> str:
-    """ Get the ClickHouse query by its name.
+def get_query_details(query_name: str, include_params: Optional[bool] = True, include_performance_samples: int = 1) -> str:
+    """ Get the ClickHouse query by its name. ALso optionally return the list of parameters from params.json and the performance samples from the ClickHouse system table.
+
     Args:
-        query_name (str): The name of the query to get
+        query_name (str): The name of the query to get as referenced in pytorch/test-infra
         include_params (bool): Whether to include the parameters from params.json in the query
+        include_performance_samples (int): The number of performance samples to include from the actual ClickHouse query execution (0 to disable). It contains the actual paramater values used in the query execution.
     Returns:
-        str: The ClickHouse query as a JSON string
+        str: A JSON string containing the query, parameters, and performance samples
     """
     result_json = {}
 
@@ -411,7 +446,31 @@ def get_query_by_name(query_name: str, include_params: Optional[bool] = False) -
         except Exception as e:
             result_json["error"] = f"Error: Failed to get params from {params_url}. {e}"
 
-    return json.dumps(result_json)
+    # get the performance samples from the ClickHouse system table
+    if include_performance_samples > 0:
+        try:
+            COLUMN_NAMES = ["event_time", "query_id",
+                            "query_duration_ms", "memory_usage", "query"]
+            performance_query = f"""
+            SELECT {', '.join(COLUMN_NAMES)}
+            FROM clusterAllReplicas(default, system.query_log)
+            WHERE left(query_id, -37) = '{query_name}' 
+            AND type = 'QueryFinish'
+            ORDER BY event_time DESC
+            LIMIT {include_performance_samples}
+            """
+            client = get_clickhouse_client()
+            res = client.query(performance_query)
+            if res and res.result_rows:
+                result_json["performance_samples"] = [
+                    dict(zip(COLUMN_NAMES, row)) for row in res.result_rows
+                ]
+
+        except Exception as e:
+            result_json[
+                "error"] = f"Error: Failed to get performance samples from ClickHouse. {e}"
+
+    return json.dumps(result_json, default=datetime_serializer, indent=2)
 
 
 # Vector store singleton
@@ -536,7 +595,7 @@ def lint_clickhouse_query(
             "errors": ["Empty query provided"],
             "formatted_query": None
         }
-    
+
     try:
         # Set up config for sqlfluff
         config = {
@@ -544,20 +603,20 @@ def lint_clickhouse_query(
         }
         if rule_exclude:
             config["exclude_rules"] = rule_exclude.split(",")
-        
+
         # Create a temporary file for better error reporting
         with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as tmp_file:
             tmp_file.write(query)
             tmp_path = tmp_file.name
-        
+
         try:
             # Lint the query
             linting_result = sqlfluff.lint(tmp_path, config=config)
-            
+
             # Format the query
             formatted_result = sqlfluff.fix(tmp_path, config=config)
             formatted_query = formatted_result.get("fix_str", query)
-            
+
             # Process the linting results
             errors = []
             for violation in linting_result:
@@ -568,15 +627,15 @@ def lint_clickhouse_query(
                     "position": violation.line_pos,
                     "context": violation.line_str if hasattr(violation, "line_str") else None
                 })
-            
+
             # Return structured results
             is_passing = len(errors) == 0
-            
+
             # Only include formatted_query if it's different from input and there were errors
             formatted_query_output = None
             if not is_passing and formatted_query != query:
                 formatted_query_output = formatted_query
-                
+
             return {
                 "status": "pass" if is_passing else "fail",
                 "errors_count": len(errors),
@@ -586,7 +645,7 @@ def lint_clickhouse_query(
         finally:
             # Clean up the temporary file
             os.unlink(tmp_path)
-    
+
     except Exception as e:
         return {
             "status": "error",
