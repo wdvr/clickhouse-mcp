@@ -57,7 +57,7 @@ def clickhouse_response_to_json(res: clickhouse_connect.driver.query.QueryResult
     if res is None or res.result_rows is None:
         return "No data returned from the query."
 
-    res = {"column_names": res.column_names, "result_rows": res.result_rows}
+    return {"column_names": res.column_names, "result_rows": res.result_rows}
 
 
 def get_clean_error_string(clickhouse_error_msg: str) -> str:
@@ -159,16 +159,21 @@ def readme_howto_use_clickhouse_tools() -> str:
         Clickhouse is a column based database used in PyTorch CI.
         It is used to store and query test results and other data.
 
-        This tool allows you to run queries, explain queries, and get the schema of the ClickHouse database.
+        This tool allows you to run queries, explain queries, and get the schema of the ClickHouse database. 
+        
+        Supported tools:
 
-        To run a query, use the `run_clickhouse_query` tool with a valid ClickHouse query string. Note that the query can't have a ; at the end.
-        To get the schema of a table, use the `get_clickhouse_schema` tool with the table name.
-        To explain a query, use the `explain_clickhouse_query` tool with a valid ClickHouse query string.
-        To get the list of tables, use the `get_clickhouse_tables` tool.
-        Use `semantic_search_docs` to search specific clickhouse functions and syntax in case of doubt or syntax errors.
-        Use `lint_clickhouse_query` to validate and format your SQL queries according to best practices.
+        - `run_clickhouse_query` Run an actual query and return result + timing. Note that the query can't have a ; at the end.
+        - `get_clickhouse_schema` Get the schema of a ClickHouse table.
+        - `get_query_execution_stats` Get the list of slow queries from the ClickHouse system table.
+        - `get_clickhouse_tables` Get the list of tables in the ClickHouse database.
+        - `explain_clickhouse_query` Explain a ClickHouse query and return the result as a JSON string.
+        - `get_query_details` Get the ClickHouse query by its name. Also optionally return the list of parameters from params.json and the performance samples from the ClickHouse system table.
+        - `semantic_search_docs` Perform a semantic search over ClickHouse documentation.
+        - `lint_clickhouse_query` Lint a ClickHouse SQL query using SQLFluff.
 
-        Use this to create and run queries if user asks things like: 'how long does the average macos build job take?'
+
+        Use this to create and run queries if user asks things like: 'what's the slowest query? How can I query X in ClickHouse?'
         """)
 
 
@@ -276,7 +281,7 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
             "data": None,
             "columns": [],
             "first_row": None,
-            "error": f"Query error: {str(e)}",
+            "error": f"Query error: {get_clean_error_string(str(e))}",
             "hash": None
         }
     except Exception as e:
@@ -364,9 +369,9 @@ def get_query_execution_stats(last_x_hours: int, limit: int = 10, query_name: Op
             return "No data returned from the query."
         # Find top 5 slowest
 
-        return safe_json_dumps(res.result_rows, indent=2)
+        return safe_json_dumps(clickhouse_response_to_json(res), indent=2)
     except clickhouse_connect.driver.exceptions.ClickHouseError as e:
-        return f"Clickhouse query error: {e}"
+        return f"Clickhouse query error: {get_clean_error_string(str(e))}"
     except Exception as e:
         return f"Unexpected error: {e}"
 
