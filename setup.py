@@ -18,6 +18,7 @@ setup(
         "clickhouse-connect>=0.6.0",
         "python-dotenv>=0.21.0",
         "faiss-cpu>=1.7.4",
+        "sqlfluff>=2.3.0"
     ],
     python_requires=">=3.7",
 )
