@@ -178,7 +178,7 @@ def readme_howto_use_clickhouse_tools() -> str:
 
 
 @mcp.tool()
-def run_clickhouse_query(query: str) -> Dict[str, Any]:
+def run_clickhouse_query(query: str, disable_cache: bool = True) -> Dict[str, Any]:
     """Runs a ClickHouse query and returns the result as a JSON file in /tmp as well as some statistics.
     Args:
         query (str): The ClickHouse query to execute
@@ -234,6 +234,12 @@ def run_clickhouse_query(query: str) -> Dict[str, Any]:
 
     try:
         query = query.replace("\\n", "\n").strip()
+
+        if query.endswith(";"):
+            query = query[:-1].strip()
+        if disable_cache:
+            query += " settings enable_filesystem_cache = 0, use_query_cache = false"
+
         res: Optional[clickhouse_connect.driver.query.QueryResult] = client.query(
             query)
         end_time = time.time()  # End timing the query execution
