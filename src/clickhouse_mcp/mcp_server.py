@@ -310,15 +310,30 @@ def get_clickhouse_schema(table_name: str) -> str:
         table_name (str): The name of the table to get the schema for
 
     Returns:
-        str: The schema of the table as a JSON string
+        str: The schema of the table as a JSON string with columns and create table statement
     """
     client = get_clickhouse_client()
     try:
-        res = client.query(f"DESCRIBE TABLE {table_name}")
-        if res is None or res.result_rows is None or len(res.result_rows) == 0:
+        # Get table columns (name and type only)
+        columns_result = client.query(f"DESCRIBE TABLE {table_name}")
+        if columns_result is None or columns_result.result_rows is None or len(columns_result.result_rows) == 0:
             return "No data returned from the query."
+        
+        # Extract only name and type from the DESCRIBE result
+        columns = [{"name": row[0], "type": row[1]} for row in columns_result.result_rows]
+        
+        # Get CREATE TABLE statement
+        create_table_result = client.query(f"SHOW CREATE TABLE {table_name}")
+        create_table = create_table_result.result_rows[0][0] if create_table_result and create_table_result.result_rows else ""
+        
+        # Build the complete result
+        schema_info = {
+            "columns": columns,
+            "create_table_statement": create_table
+        }
+        
         # Convert to JSON string with size limit
-        json_result = safe_json_dumps(res.result_rows, indent=2)
+        json_result = safe_json_dumps(schema_info, indent=2)
         return json_result
     except Exception as e:
         return f"Error: {e}"
