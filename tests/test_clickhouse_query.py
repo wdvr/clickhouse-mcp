@@ -49,6 +49,8 @@ class TestClickhouseQuery(unittest.TestCase):
         # Setup mock return value
         mock_result = MagicMock()
         mock_result.result_rows = [{"column1": "value1", "column2": "value2"}]
+        mock_result.column_names = ["column1", "column2"]
+        mock_result.query_id = "test_query_id"
         self.mock_client.query.return_value = mock_result
 
         # Call the function
@@ -56,17 +58,20 @@ class TestClickhouseQuery(unittest.TestCase):
             result = run_clickhouse_query("SELECT * FROM test_table")
         
         # Assertions
-        self.mock_client.query.assert_called_once_with("SELECT * FROM test_table")
+        self.mock_client.query.assert_called_once_with("SELECT * FROM test_table")  # No settings since measure_performance=False
         mock_file.assert_called_once()
         self.assertTrue("result_file" in result)
         self.assertTrue("/tmp/clickhouse_query_result_" in result["result_file"])
         self.assertTrue(result["result_file"].endswith(".json"))
+        self.assertEqual(result["query_id"], "test_query_id")  # Check query_id is included in results
 
     def test_run_clickhouse_query_empty_result(self):
         """Test running a query that returns no data."""
         # Setup mock return value for empty result
         mock_result = MagicMock()
         mock_result.result_rows = []
+        mock_result.column_names = ["column1", "column2"]
+        mock_result.query_id = "empty_query_id"
         self.mock_client.query.return_value = mock_result
 
         # Call the function
@@ -76,16 +81,78 @@ class TestClickhouseQuery(unittest.TestCase):
         # The function now returns a dictionary with result information
         self.assertIsInstance(result, dict)
         self.assertIsNotNone(result["result_file"])
+        self.assertEqual(result["result_rows"], 0)  # Should be 0 rows
+        self.assertEqual(result["query_id"], "empty_query_id")
+        self.assertEqual(result["columns"], ["column1", "column2"])
+        
+    def test_run_clickhouse_query_with_performance_metrics(self):
+        """Test running a query with performance measurement enabled."""
+        # Setup mock return values
+        mock_query_result = MagicMock()
+        mock_query_result.result_rows = [{"column1": "value1"}]
+        mock_query_result.column_names = ["column1"]
+        
+        mock_perf_result = MagicMock()
+        mock_perf_result.result_rows = [(
+            "2025-03-27 10:00:00",  # event_time
+            150,                    # query_duration_ms
+            2048                    # memory_usage
+        )]
+        
+        # Add query_id attribute to mock_query_result
+        mock_query_result.query_id = "server_generated_query_id_12345"
+        
+        # Configure the mock to return different results for different queries
+        def mock_query_side_effect(query):
+            if "system.query_log" in query:
+                return mock_perf_result
+            return mock_query_result
+            
+        self.mock_client.query.side_effect = mock_query_side_effect
+        
+        # Use patch to avoid actual file operations
+        with patch('builtins.open', mock.mock_open()) as mock_file, \
+             patch('time.sleep') as mock_sleep:  # Also patch sleep to avoid delays
+            
+            result = run_clickhouse_query("SELECT * FROM test_table", measure_performance=True)
+        
+        # Assertions
+        self.assertIn("settings enable_filesystem_cache = 0, use_query_cache = false", 
+                     self.mock_client.query.call_args_list[0].args[0])
+        # Should NOT contain query_id in the query string anymore
+        self.assertNotIn("query_id =", self.mock_client.query.call_args_list[0].args[0])
+        
+        # Check that the second query (to system.query_log) uses the server-generated query_id
+        self.assertIn(f"query_id = 'server_generated_query_id_12345'", 
+                     str(self.mock_client.query.call_args_list[1]))
+        self.assertEqual(self.mock_client.query.call_count, 2)  # Original query + query_log query
+        
+        # Check that performance data is included
+        self.assertIn("performance", result)
+        self.assertEqual(result["performance"]["duration_ms"], 150)
+        self.assertEqual(result["performance"]["memory_usage"], 2048)
 
     def test_get_clickhouse_schema(self):
         """Test getting a table schema."""
-        # Setup mock return value
-        mock_result = MagicMock()
-        mock_result.result_rows = [
-            {"name": "id", "type": "UInt32", "default_type": "", "default_expression": "", "comment": "", "codec_expression": "", "ttl_expression": ""},
-            {"name": "name", "type": "String", "default_type": "", "default_expression": "", "comment": "", "codec_expression": "", "ttl_expression": ""}
+        # Setup mock return values for both queries
+        mock_describe_result = MagicMock()
+        mock_describe_result.result_rows = [
+            ["id", "UInt32", "", "", "", "", ""],
+            ["name", "String", "", "", "", "", ""]
         ]
-        self.mock_client.query.return_value = mock_result
+        
+        mock_create_result = MagicMock()
+        mock_create_result.result_rows = [["CREATE TABLE test_table (id UInt32, name String) ENGINE = MergeTree"]]
+        
+        # Set up the mock to return different results for different queries
+        def mock_query_side_effect(query):
+            if "DESCRIBE TABLE" in query:
+                return mock_describe_result
+            elif "SHOW CREATE TABLE" in query:
+                return mock_create_result
+            return MagicMock()
+        
+        self.mock_client.query.side_effect = mock_query_side_effect
 
         # Call the function
         result = get_clickhouse_schema("test_table")
@@ -94,10 +161,11 @@ class TestClickhouseQuery(unittest.TestCase):
         parsed_result = json.loads(result)
         
         # Assertions
-        self.mock_client.query.assert_called_once_with("DESCRIBE TABLE test_table")
-        self.assertEqual(len(parsed_result), 2)
-        self.assertEqual(parsed_result[0]["name"], "id")
-        self.assertEqual(parsed_result[1]["type"], "String")
+        self.assertEqual(self.mock_client.query.call_count, 2)
+        self.assertEqual(len(parsed_result["columns"]), 2)
+        self.assertEqual(parsed_result["columns"][0]["name"], "id")
+        self.assertEqual(parsed_result["columns"][1]["type"], "String")
+        self.assertIn("CREATE TABLE", parsed_result["create_table_statement"])
 
     def test_explain_clickhouse_query(self):
         """Test explaining a ClickHouse query."""

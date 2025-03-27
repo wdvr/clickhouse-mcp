@@ -5,7 +5,6 @@ from . import DEFAULT_BEDROCK_MODEL, DEFAULT_REGION
 from .vector_search import load_faiss_index, vector_search, get_default_index_path
 from langchain_community.vectorstores import FAISS
 from langchain_aws import BedrockEmbeddings
-import hashlib
 import clickhouse_connect
 import json
 import datetime
@@ -163,7 +162,7 @@ def readme_howto_use_clickhouse_tools() -> str:
         
         Supported tools:
 
-        - `run_clickhouse_query` Run an actual query and return result + timing. Note that the query can't have a ; at the end.
+        - `run_clickhouse_query` Run an actual query and return result + timing. Use the measure_performance flag for detailed metrics. Note that the query can't have a ; at the end.
         - `get_clickhouse_schema` Get the schema of a ClickHouse table.
         - `get_query_execution_stats` Get the list of slow queries from the ClickHouse system table.
         - `get_clickhouse_tables` Get the list of tables in the ClickHouse database.
@@ -178,10 +177,12 @@ def readme_howto_use_clickhouse_tools() -> str:
 
 
 @mcp.tool()
-def run_clickhouse_query(query: str, disable_cache: bool = True) -> Dict[str, Any]:
+def run_clickhouse_query(query: str, measure_performance: bool = False) -> Dict[str, Any]:
     """Runs a ClickHouse query and returns the result as a JSON file in /tmp as well as some statistics.
     Args:
         query (str): The ClickHouse query to execute
+        measure_performance (bool): Whether to measure and log precise query performance (increases function call wall time,
+        but gives precise runtime and memory usage metrics)
 
     Returns:
         result['result_file']: A file containing the result of the query as a JSON string
@@ -191,20 +192,14 @@ def run_clickhouse_query(query: str, disable_cache: bool = True) -> Dict[str, An
         result['first_row']: The first row of the result set
         result['error']: An error message if the query failed
         result['hash']: The hash of the query result
+        result['performance']: (Optional) Detailed performance metrics if measure_performance is True
 
     """
     start_time = time.time()  # Start timing the query execution
-    error = None
 
     if not query or not query.strip():
         return {
-            "result_file": None,
-            "time": 0,
-            "data": None,
-            "columns": [],
-            'first_row': None,
             "error": "Error: Empty query provided",
-            "hash": None
         }
 
     try:
@@ -212,24 +207,12 @@ def run_clickhouse_query(query: str, disable_cache: bool = True) -> Dict[str, An
     except ValueError as e:
         # Handle missing environment variables
         return {
-            "result_file": None,
-            "time": time.time() - start_time,
-            "data": None,
-            "columns": [],
-            "first_row": None,
             "error": f"Configuration error: {str(e)}",
-            "hash": None
         }
     except Exception as e:
         # Handle connection errors
         return {
-            "result_file": None,
-            "time": time.time() - start_time,
-            "data": None,
-            "columns": [],
-            "first_row": None,
             "error": f"Connection error: Failed to connect to ClickHouse server: {str(e)}",
-            "hash": None
         }
 
     try:
@@ -237,8 +220,11 @@ def run_clickhouse_query(query: str, disable_cache: bool = True) -> Dict[str, An
 
         if query.endswith(";"):
             query = query[:-1].strip()
-        if disable_cache:
-            query += " settings enable_filesystem_cache = 0, use_query_cache = false"
+
+        if measure_performance:
+            # disable caching to get accurate performance measurements
+            settings = "settings enable_filesystem_cache = 0, use_query_cache = false"
+            query += f" {settings}"
 
         res: Optional[clickhouse_connect.driver.query.QueryResult] = client.query(
             query)
@@ -258,47 +244,67 @@ def run_clickhouse_query(query: str, disable_cache: bool = True) -> Dict[str, An
                 f.write(json_result)  # Write the JSON result to the file
         except IOError as e:
             return {
-                "result_file": None,
                 "time": end_time - start_time,
-                "data": None,
                 "columns": column_names,
-                "first_row": None,
                 "error": f"File system error: Failed to write result to file: {str(e)}",
-                "hash": None
             }
 
         json_data = json.loads(json_result)
-
-        # Return the file path
-        return {
+        
+        # Build the base result
+        result = {
             "result_file": filename,
             "time": end_time - start_time,
-            "data": len(json_result),
+            "result_rows": len(json_data),
             "columns": column_names,
             "first_row": json_data[0] if json_data and len(json_data) else None,
-            "error": error,
-            "hash": hashlib.sha256(json_result.encode()).hexdigest()
+            "query_id" : res.query_id,
         }
+        
+        # If performance measurement is enabled, fetch the query log data
+        if measure_performance:
+            while True:
+                try:
+                    # Wait a moment to ensure query_log gets populated
+                    time.sleep(0.5)
+
+                    # Query the system.query_log table for detailed performance metrics
+                    # Only use columns we have confirmed access to
+                    perf_query = f"""
+                    SELECT 
+                        event_time, 
+                        query_duration_ms,
+                        memory_usage
+                    FROM system.query_log
+                    WHERE query_id = '{res.query_id}'
+                      AND type = 'QueryFinish'
+                    LIMIT 1
+                    """
+
+                    perf_result = client.query(perf_query)
+
+                    if perf_result and perf_result.result_rows:
+                        row = perf_result.result_rows[0]
+                        result["performance"] = {
+                            "duration_ms": row[1],
+                            "memory_usage": row[2]
+                        }
+                        break
+                except Exception as e:
+                    result["performance_error"] = f"Failed to retrieve performance data: {str(e)}"
+                    break
+                
+        return result
 
     except clickhouse_connect.driver.exceptions.ClickHouseError as e:
         return {
-            "result_file": None,
             "time": time.time() - start_time,
-            "data": None,
-            "columns": [],
-            "first_row": None,
             "error": f"Query error: {get_clean_error_string(str(e))}",
-            "hash": None
         }
     except Exception as e:
         return {
-            "result_file": None,
             "time": time.time() - start_time,
-            "data": None,
-            "columns": [],
-            "first_row": None,
             "error": f"Unexpected error during query execution: {str(e)}",
-            "hash": None
         }
 
 
