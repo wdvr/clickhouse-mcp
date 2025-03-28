@@ -263,7 +263,9 @@ def run_clickhouse_query(query: str, measure_performance: bool = False) -> Dict[
         
         # If performance measurement is enabled, fetch the query log data
         if measure_performance:
-            while True:
+            perf_result = None
+            # wait for 1 minute max
+            for _ in range(60 // 5):
                 try:
                     # Wait a moment to ensure query_log gets populated
                     time.sleep(0.5)
@@ -293,6 +295,8 @@ def run_clickhouse_query(query: str, measure_performance: bool = False) -> Dict[
                 except Exception as e:
                     result["performance_error"] = f"Failed to retrieve performance data: {str(e)}"
                     break
+            if not perf_result or not perf_result.result_rows:
+                result["performance_error"] = "Performance data search timed out"
                 
         return result
 
