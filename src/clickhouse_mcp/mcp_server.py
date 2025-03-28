@@ -268,7 +268,7 @@ def run_clickhouse_query(query: str, measure_performance: bool = False) -> Dict[
             for _ in range(60 // 5):
                 try:
                     # Wait a moment to ensure query_log gets populated
-                    time.sleep(0.5)
+                    time.sleep(5)
 
                     # Query the system.query_log table for detailed performance metrics
                     # Only use columns we have confirmed access to
