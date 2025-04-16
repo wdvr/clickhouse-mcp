@@ -166,7 +166,7 @@ def readme_howto_use_clickhouse_tools() -> str:
         - `get_clickhouse_schema` Get the schema of a ClickHouse table.
         - `get_query_execution_stats` Get the list of slow queries from the ClickHouse system table.
         - `get_clickhouse_tables` Get the list of tables in the ClickHouse database.
-        - `explain_clickhouse_query` Explain a ClickHouse query and return the result as a JSON string.
+        - `explain_clickhouse_query` Explain a ClickHouse query using multiple optional EXPLAIN types (PLAN, PIPELINE, ESTIMATE) and return the combined results.
         - `get_query_details` Get the ClickHouse query by its name. Also optionally return the list of parameters from params.json and the performance samples from the ClickHouse system table.
         - `semantic_search_docs` Perform a semantic search over ClickHouse documentation.
         - `lint_clickhouse_query` Lint a ClickHouse SQL query using SQLFluff.
@@ -343,7 +343,7 @@ def get_clickhouse_schema(table_name: str) -> str:
         }
         
         # Convert to JSON string with size limit
-        json_result = safe_json_dumps(schema_info, indent=2)
+        json_result = safe_json_dumps(schema_info, indent=2, max_size=128 * 1024)
         return json_result
     except Exception as e:
         return f"Error: {e}"
@@ -408,25 +408,78 @@ def get_query_execution_stats(last_x_hours: int, limit: int = 10, query_name: Op
 
 
 @mcp.tool()
-def explain_clickhouse_query(query: str) -> str:
-    """Explain a ClickHouse query and return the result as a JSON string.
+def explain_clickhouse_query(
+    query: str, 
+    explain_plan: bool = False, 
+    explain_pipeline: bool = False,
+    explain_estimate: bool = False
+) -> Dict[str, Any]:
+    """Explain a ClickHouse query using multiple optional EXPLAIN types.
 
     Args:
         query (str): The ClickHouse query to explain
+        explain_plan (bool): Whether to include EXPLAIN PLAN with actions=1 and indexes=1
+        explain_pipeline (bool): Whether to include EXPLAIN PIPELINE with graph=1
+        explain_estimate (bool): Whether to include EXPLAIN ESTIMATE
+
+        simple EXPLAIN {query} is always run, plus any additional explain types requested
 
     Returns:
-        str: The explanation of the query as a JSON string
+        Dict[str, Any]: Dictionary containing results from each requested EXPLAIN type
     """
     client = get_clickhouse_client()
+    result = {}
+    
     try:
-        res = client.query(f"EXPLAIN {query}")
-        if res is None or res.result_rows is None or len(res.result_rows) == 0:
-            return "No data returned from the query."
-        # Convert to JSON string with size limit
-        json_result = safe_json_dumps(res.result_rows, indent=2)
-        return json_result
+        # Default EXPLAIN (query plan) - always run this
+        try:
+            res = client.query(f"EXPLAIN {query}")
+            if res is not None and res.result_rows is not None and len(res.result_rows) > 0:
+                result["default_explain"] = res.result_rows
+        except Exception as e:
+            result["default_explain_error"] = f"Error: {str(e)}"
+        
+        # EXPLAIN PLAN with actions and indexes
+        if explain_plan:
+            try:
+                plan_res = client.query(f"EXPLAIN PLAN actions=1, indexes=1 {query}")
+                if plan_res is not None and plan_res.result_rows is not None and len(plan_res.result_rows) > 0:
+                    result["explain_plan"] = plan_res.result_rows
+            except Exception as e:
+                result["explain_plan_error"] = f"Error: {str(e)}"
+        
+        # EXPLAIN PIPELINE with graph
+        if explain_pipeline:
+            try:
+                pipe_res = client.query(f"EXPLAIN PIPELINE graph=1 {query}")
+                if pipe_res is not None and pipe_res.result_rows is not None and len(pipe_res.result_rows) > 0:
+                    result["explain_pipeline"] = pipe_res.result_rows
+            except Exception as e:
+                result["explain_pipeline_error"] = f"Error: {str(e)}"
+        
+        # EXPLAIN ESTIMATE
+        if explain_estimate:
+            try:
+                est_res = client.query(f"EXPLAIN ESTIMATE {query}")
+                if est_res is not None and est_res.result_rows is not None and len(est_res.result_rows) > 0:
+                    result["explain_estimate"] = est_res.result_rows
+                elif est_res is not None and est_res.column_names is not None:
+                    # EXPLAIN ESTIMATE might return empty rows but with column names
+                    result["explain_estimate"] = {
+                        "columns": est_res.column_names,
+                        "rows": [],
+                        "note": "No estimate data returned, query might be too simple or not supported for estimation"
+                    }
+            except Exception as e:
+                result["explain_estimate_error"] = f"Error: {str(e)}"
+        
+        # Return the dictionary result directly
+        if not result:
+            return {"error": "No explain data returned from any of the explain methods."}
+            
+        return result
     except Exception as e:
-        return f"Error: {e}"
+        return {"error": f"Error during explain operations: {str(e)}"}
 
 
 @mcp.tool()

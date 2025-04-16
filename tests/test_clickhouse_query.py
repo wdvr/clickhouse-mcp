@@ -169,20 +169,95 @@ class TestClickhouseQuery(unittest.TestCase):
 
     def test_explain_clickhouse_query(self):
         """Test explaining a ClickHouse query."""
-        # Setup mock return value
-        mock_result = MagicMock()
-        mock_result.result_rows = [{"explain": "Query plan details..."}]
-        self.mock_client.query.return_value = mock_result
+        # Setup mock return value for default EXPLAIN
+        mock_default_result = MagicMock()
+        mock_default_result.result_rows = [["Expression (Projection)"], ["  ReadFromMergeTree"]]
+        mock_default_result.column_names = ["explain"]
 
-        # Call the function
+        # Setup mock return value for EXPLAIN PLAN
+        mock_plan_result = MagicMock()
+        mock_plan_result.result_rows = [["Plan with actions and indexes"]]
+        mock_plan_result.column_names = ["explain"]
+        
+        # Setup mock return value for EXPLAIN ESTIMATE
+        mock_estimate_result = MagicMock()
+        mock_estimate_result.result_rows = []
+        mock_estimate_result.column_names = ["database", "table", "parts", "rows", "marks"]
+        
+        # Setup mock return value for EXPLAIN PIPELINE
+        mock_pipeline_result = MagicMock() 
+        mock_pipeline_result.result_rows = [["Pipeline with graph=1"]]
+        mock_pipeline_result.column_names = ["explain"]
+        
+        # Configure mock to return different values based on query
+        def side_effect(query):
+            if "EXPLAIN ESTIMATE" in query:
+                return mock_estimate_result
+            elif "EXPLAIN PLAN" in query:
+                return mock_plan_result
+            elif "EXPLAIN PIPELINE" in query:
+                return mock_pipeline_result
+            elif query.startswith("EXPLAIN"):
+                return mock_default_result
+            return MagicMock()
+                
+        self.mock_client.query.side_effect = side_effect
+
+        # Test 1: Call with default parameters
+        self.mock_client.query.reset_mock()
         result = explain_clickhouse_query("SELECT * FROM test_table")
         
-        # Parse the JSON result
-        parsed_result = json.loads(result)
+        # Verify basic explain functionality
+        self.assertIn("default_explain", result)
+        self.assertEqual(result["default_explain"], [["Expression (Projection)"], ["  ReadFromMergeTree"]])
+        self.assertNotIn("explain_estimate", result)  # Default is now False
+        self.assertNotIn("explain_plan", result)
+        self.assertNotIn("explain_pipeline", result)
         
-        # Assertions
-        self.mock_client.query.assert_called_once_with("EXPLAIN SELECT * FROM test_table")
-        self.assertEqual(parsed_result[0]["explain"], "Query plan details...")
+        # Only default EXPLAIN call should be made
+        self.assertEqual(len(self.mock_client.query.call_args_list), 1)
+        self.assertEqual(self.mock_client.query.call_args_list[0][0][0], "EXPLAIN SELECT * FROM test_table")
+        
+        # Test 2: Enable EXPLAIN ESTIMATE 
+        self.mock_client.query.reset_mock()
+        result = explain_clickhouse_query("SELECT * FROM test_table", explain_estimate=True)
+        
+        # Verify both default and estimate are included
+        self.assertIn("default_explain", result) 
+        self.assertIn("explain_estimate", result)
+        self.assertEqual(result["explain_estimate"]["columns"], ["database", "table", "parts", "rows", "marks"])
+        
+        # Both calls should be made
+        self.assertEqual(len(self.mock_client.query.call_args_list), 2)
+        self.assertEqual(self.mock_client.query.call_args_list[0][0][0], "EXPLAIN SELECT * FROM test_table")
+        self.assertEqual(self.mock_client.query.call_args_list[1][0][0], "EXPLAIN ESTIMATE SELECT * FROM test_table")
+        
+        # Test 3: Enable EXPLAIN PLAN
+        self.mock_client.query.reset_mock()
+        result = explain_clickhouse_query("SELECT * FROM test_table", explain_plan=True)
+        
+        # Verify both default and plan are included
+        self.assertIn("default_explain", result)
+        self.assertIn("explain_plan", result)
+        self.assertNotIn("explain_estimate", result)  # Should not be present with default settings
+        
+        # Both calls should be made
+        self.assertEqual(len(self.mock_client.query.call_args_list), 2)
+        self.assertEqual(self.mock_client.query.call_args_list[0][0][0], "EXPLAIN SELECT * FROM test_table")
+        self.assertEqual(self.mock_client.query.call_args_list[1][0][0], "EXPLAIN PLAN actions=1, indexes=1 SELECT * FROM test_table")
+        
+        # Test 4: Enable all explain types
+        self.mock_client.query.reset_mock()
+        result = explain_clickhouse_query("SELECT * FROM test_table", explain_plan=True, explain_pipeline=True, explain_estimate=True)
+        
+        # Verify all types are included
+        self.assertIn("default_explain", result)
+        self.assertIn("explain_plan", result)
+        self.assertIn("explain_pipeline", result)
+        self.assertIn("explain_estimate", result)
+        
+        # All four calls should be made
+        self.assertEqual(len(self.mock_client.query.call_args_list), 4)
 
     def test_get_clickhouse_tables(self):
         """Test getting the list of tables."""
