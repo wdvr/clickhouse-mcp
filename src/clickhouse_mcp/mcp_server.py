@@ -237,7 +237,7 @@ def run_clickhouse_query(query: str, measure_performance: bool = False) -> Dict[
             res.result_rows, indent=2, default=datetime_serializer)
 
         # Save to a temporary file - generate the filename to be unique
-        filename = f"/tmp/clickhouse_query_result_{os.getpid()}.json"
+        filename = f"/tmp/clickhouse_query_result_{res.query_id}.json"
 
         try:
             with open(filename, "w") as f:
