@@ -416,6 +416,8 @@ def explain_clickhouse_query(
 ) -> Dict[str, Any]:
     """Explain a ClickHouse query using multiple optional EXPLAIN types.
 
+    Note: expects a valid SELECT query, function prepends it with `EXPLAIN {query}` internally.
+
     Args:
         query (str): The ClickHouse query to explain
         explain_plan (bool): Whether to include EXPLAIN PLAN with actions=1 and indexes=1
