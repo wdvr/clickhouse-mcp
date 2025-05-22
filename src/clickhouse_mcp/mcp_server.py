@@ -165,7 +165,7 @@ def readme_howto_use_clickhouse_tools() -> str:
         - `run_clickhouse_query` Run an actual query and return result + timing. Use the measure_performance flag for detailed metrics. Note that the query can't have a ; at the end.
         - `get_clickhouse_schema` Get the schema of a ClickHouse table.
         - `get_query_execution_stats` Get the list of slow queries from the ClickHouse system table.
-        - `get_clickhouse_tables` Get the list of tables in the ClickHouse database.
+        - `get_clickhouse_tables` Get the list of tables from a specific database or all databases. Use the database parameter to specify a database (default is 'default') or set databases='all' to query tables from all available databases (default, benchmark, misc).
         - `explain_clickhouse_query` Explain a ClickHouse query using multiple optional EXPLAIN types (PLAN, PIPELINE, ESTIMATE) and return the combined results.
         - `get_query_details` Get the ClickHouse query by its name. Also optionally return the list of parameters from params.json and the performance samples from the ClickHouse system table.
         - `semantic_search_docs` Perform a semantic search over ClickHouse documentation.
@@ -483,20 +483,44 @@ def explain_clickhouse_query(
 
 
 @mcp.tool()
-def get_clickhouse_tables() -> str:
+def get_clickhouse_tables(database: Optional[str] = "default", databases: Optional[str] = None) -> str:
     """Get the list of tables in the ClickHouse database.
 
+    Args:
+        database (Optional[str]): The database to query tables from. Defaults to 'default'.
+        databases (Optional[str]): If set to 'all', returns tables from all available databases (default, benchmark, misc).
+                                  This parameter takes precedence over the database parameter.
+
     Returns:
-        str: The list of tables as a JSON string
+        str: The list of tables as a JSON string, grouped by database if multiple are requested
     """
     client = get_clickhouse_client()
     try:
-        res = client.query("SHOW TABLES")
-        if res is None or res.result_rows is None or len(res.result_rows) == 0:
-            return "No data returned from the query."
-        # Convert to JSON string with size limit
-        json_result = safe_json_dumps(res.result_rows, indent=2)
-        return json_result
+        if databases == "all":
+            # Query tables from all supported databases
+            dbs_to_query = ["default", "benchmark", "misc"]
+            all_tables = {}
+            
+            for db in dbs_to_query:
+                res = client.query(f"SHOW TABLES FROM {db}")
+                if res is not None and res.result_rows is not None and len(res.result_rows) > 0:
+                    # Group tables by database
+                    all_tables[db] = res.result_rows
+                else:
+                    all_tables[db] = []
+                    
+            # Convert to JSON string with size limit
+            json_result = safe_json_dumps(all_tables, indent=2)
+            return json_result
+        else:
+            # Query tables from a single database
+            res = client.query(f"SHOW TABLES FROM {database}")
+            if res is None or res.result_rows is None or len(res.result_rows) == 0:
+                return f"No tables found in database '{database}'."
+            
+            # Convert to JSON string with size limit
+            json_result = safe_json_dumps(res.result_rows, indent=2)
+            return json_result
     except Exception as e:
         return f"Error: {e}"
 
