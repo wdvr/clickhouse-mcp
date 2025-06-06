@@ -177,25 +177,29 @@ def readme_howto_use_clickhouse_tools() -> str:
 
 
 @mcp.tool()
-def run_clickhouse_query(query: str, measure_performance: bool = False) -> Dict[str, Any]:
-    """Runs a ClickHouse query and returns the result as a JSON file in /tmp as well as some statistics.
+def run_clickhouse_query(query: str, inline_result_limit_bytes: int = 1024, measure_performance: bool = False) -> Dict[str, Any]:
+    """Runs a ClickHouse query and returns the result as a JSON (and optionally a file).
     Args:
         query (str): The ClickHouse query to execute
+        inline_result_limit_bytes (int): Maximum bytes for inline result rows (default: 1024, max: 10240)
         measure_performance (bool): Whether to measure and log precise query performance (increases function call wall time,
-        but gives precise runtime and memory usage metrics)
+            but gives precise runtime and memory usage metrics)
 
     Returns:
-        result['result_file']: A file containing the result of the query as a JSON string
         result['time']: The time taken to execute the query
-        result['rows']: The number of rows returned by the query
+        result['result_rows']: Array of result rows that fit within the byte limit (at least one row is always returned)
+        result['total_result_rows_n']: Total number of rows returned by the query
         result['columns']: The number of columns returned by the query
-        result['first_row']: The first row of the result set
         result['error']: An error message if the query failed
         result['hash']: The hash of the query result
         result['performance']: (Optional) Detailed performance metrics if measure_performance is True
+        result['result_file']: (Optional, if enabled) A file containing the result of the query as a JSON string
 
     """
     start_time = time.time()  # Start timing the query execution
+
+    # Enforce hard max limit of 10KB
+    inline_result_limit_bytes = min(inline_result_limit_bytes, 10240)
 
     if not query or not query.strip():
         return {
@@ -232,34 +236,63 @@ def run_clickhouse_query(query: str, measure_performance: bool = False) -> Dict[
 
         column_names = res.column_names
         # dump to json, with converting datetime to string
-
         json_result = json.dumps(
             res.result_rows, indent=2, default=datetime_serializer)
 
-        # Save to a temporary file - generate the filename to be unique
-        filename = f"/tmp/clickhouse_query_result_{res.query_id}.json"
+        # Check if tmp file generation is disabled
+        disable_tmp_files = os.getenv("CLICKHOUSE_DISABLE_TMP_FILES", "false").lower() == "true"
+        filename = None
+        
+        if not disable_tmp_files:
+            # Save to a temporary file - generate the filename to be unique
+            filename = f"/tmp/clickhouse_query_result_{res.query_id}.json"
 
-        try:
-            with open(filename, "w") as f:
-                f.write(json_result)  # Write the JSON result to the file
-        except IOError as e:
-            return {
-                "time": end_time - start_time,
-                "columns": column_names,
-                "error": f"File system error: Failed to write result to file: {str(e)}",
-            }
+            try:
+                with open(filename, "w") as f:
+                    f.write(json_result)  # Write the JSON result to the file
+            except IOError as e:
+                return {
+                    "time": end_time - start_time,
+                    "columns": column_names,
+                    "error": f"File system error: Failed to write result to file: {str(e)}",
+                }
 
         json_data = json.loads(json_result)
         
+        # Limit result rows by byte size
+        limited_rows = []
+        current_size = 0
+        size_limit_exceeded = False
+        
+        for row in json_data:
+            row_json = json.dumps(row, default=datetime_serializer)
+            row_size = len(row_json.encode('utf-8'))
+            
+            if not limited_rows or current_size + row_size <= inline_result_limit_bytes:
+                limited_rows.append(row)
+                current_size += row_size
+            else:
+                size_limit_exceeded = True
+                break
+        
         # Build the base result
         result = {
-            "result_file": filename,
             "time": end_time - start_time,
-            "result_rows": len(json_data),
+            "result_rows": limited_rows,
+            "total_result_rows_n": len(json_data),
             "columns": column_names,
-            "first_row": json_data[0] if json_data and len(json_data) else None,
             "query_id" : res.query_id,
         }
+        
+        # Only include result_file if tmp file was created
+        if filename is not None:
+            result["result_file"] = filename
+
+        if size_limit_exceeded:
+            result["warning"] = (
+                f"Inline result rows limited to {len(limited_rows)} rows due to size limit of {inline_result_limit_bytes} bytes. "
+                "`result_file` has the full results." if filename else "Request fewer rows or increase the limit to get more results."
+            )
         
         # If performance measurement is enabled, fetch the query log data
         if measure_performance:
