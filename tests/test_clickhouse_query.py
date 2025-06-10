@@ -273,7 +273,7 @@ class TestClickhouseQuery(unittest.TestCase):
         parsed_result = json.loads(result)
         
         # Assertions
-        self.mock_client.query.assert_called_once_with("SHOW TABLES")
+        self.mock_client.query.assert_called_once_with("SHOW TABLES FROM default")
         self.assertEqual(len(parsed_result), 2)
         self.assertEqual(parsed_result[0]["name"], "table1")
         self.assertEqual(parsed_result[1]["name"], "table2")
