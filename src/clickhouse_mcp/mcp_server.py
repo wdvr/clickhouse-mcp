@@ -395,8 +395,9 @@ def get_query_execution_stats(last_x_hours: int, limit: int = 10, query_name: Op
     query_name_filter = ""
     if query_name:
         # Ensure the query_id is sanitized to prevent SQL injection
-        query_name_filter = f"AND query_id LIKE '%{
-            query_name}%'"
+        query_name_filter = f""
+            "AND query_id LIKE '%{query_name}%'
+            """
 
     QUERY = f"""
     SELECT
