@@ -158,8 +158,8 @@ def readme_howto_use_clickhouse_tools() -> str:
         Clickhouse is a column based database used in PyTorch CI.
         It is used to store and query test results and other data.
 
-        This tool allows you to run queries, explain queries, and get the schema of the ClickHouse database. 
-        
+        This tool allows you to run queries, explain queries, and get the schema of the ClickHouse database.
+
         Supported tools:
 
         - `run_clickhouse_query` Run an actual query and return result + timing. Use the measure_performance flag for detailed metrics. Note that the query can't have a ; at the end.
@@ -240,9 +240,10 @@ def run_clickhouse_query(query: str, inline_result_limit_bytes: int = 1024, meas
             res.result_rows, indent=2, default=datetime_serializer)
 
         # Check if tmp file generation is disabled
-        disable_tmp_files = os.getenv("CLICKHOUSE_DISABLE_TMP_FILES", "false").lower() == "true"
+        disable_tmp_files = os.getenv(
+            "CLICKHOUSE_DISABLE_TMP_FILES", "false").lower() == "true"
         filename = None
-        
+
         if not disable_tmp_files:
             # Save to a temporary file - generate the filename to be unique
             filename = f"/tmp/clickhouse_query_result_{res.query_id}.json"
@@ -258,32 +259,32 @@ def run_clickhouse_query(query: str, inline_result_limit_bytes: int = 1024, meas
                 }
 
         json_data = json.loads(json_result)
-        
+
         # Limit result rows by byte size
         limited_rows = []
         current_size = 0
         size_limit_exceeded = False
-        
+
         for row in json_data:
             row_json = json.dumps(row, default=datetime_serializer)
             row_size = len(row_json.encode('utf-8'))
-            
+
             if not limited_rows or current_size + row_size <= inline_result_limit_bytes:
                 limited_rows.append(row)
                 current_size += row_size
             else:
                 size_limit_exceeded = True
                 break
-        
+
         # Build the base result
         result = {
             "time": end_time - start_time,
             "result_rows": limited_rows,
             "total_result_rows_n": len(json_data),
             "columns": column_names,
-            "query_id" : res.query_id,
+            "query_id": res.query_id,
         }
-        
+
         # Only include result_file if tmp file was created
         if filename is not None:
             result["result_file"] = filename
@@ -293,7 +294,7 @@ def run_clickhouse_query(query: str, inline_result_limit_bytes: int = 1024, meas
                 f"Inline result rows limited to {len(limited_rows)} rows due to size limit of {inline_result_limit_bytes} bytes. "
                 "`result_file` has the full results." if filename else "Request fewer rows or increase the limit to get more results."
             )
-        
+
         # If performance measurement is enabled, fetch the query log data
         if measure_performance:
             perf_result = None
@@ -306,8 +307,8 @@ def run_clickhouse_query(query: str, inline_result_limit_bytes: int = 1024, meas
                     # Query the system.query_log table for detailed performance metrics
                     # Only use columns we have confirmed access to
                     perf_query = f"""
-                    SELECT 
-                        event_time, 
+                    SELECT
+                        event_time,
                         query_duration_ms,
                         memory_usage
                     FROM system.query_log
@@ -326,11 +327,12 @@ def run_clickhouse_query(query: str, inline_result_limit_bytes: int = 1024, meas
                         }
                         break
                 except Exception as e:
-                    result["performance_error"] = f"Failed to retrieve performance data: {str(e)}"
+                    result[
+                        "performance_error"] = f"Failed to retrieve performance data: {str(e)}"
                     break
             if not perf_result or not perf_result.result_rows:
                 result["performance_error"] = "Performance data search timed out"
-                
+
         return result
 
     except clickhouse_connect.driver.exceptions.ClickHouseError as e:
@@ -361,22 +363,25 @@ def get_clickhouse_schema(table_name: str) -> str:
         columns_result = client.query(f"DESCRIBE TABLE {table_name}")
         if columns_result is None or columns_result.result_rows is None or len(columns_result.result_rows) == 0:
             return "No data returned from the query."
-        
+
         # Extract only name and type from the DESCRIBE result
-        columns = [{"name": row[0], "type": row[1]} for row in columns_result.result_rows]
-        
+        columns = [{"name": row[0], "type": row[1]}
+                   for row in columns_result.result_rows]
+
         # Get CREATE TABLE statement
         create_table_result = client.query(f"SHOW CREATE TABLE {table_name}")
-        create_table = create_table_result.result_rows[0][0] if create_table_result and create_table_result.result_rows else ""
-        
+        create_table = create_table_result.result_rows[0][
+            0] if create_table_result and create_table_result.result_rows else ""
+
         # Build the complete result
         schema_info = {
             "columns": columns,
             "create_table_statement": create_table
         }
-        
+
         # Convert to JSON string with size limit
-        json_result = safe_json_dumps(schema_info, indent=2, max_size=128 * 1024)
+        json_result = safe_json_dumps(
+            schema_info, indent=2, max_size=128 * 1024)
         return json_result
     except Exception as e:
         return f"Error: {e}"
@@ -395,8 +400,8 @@ def get_query_execution_stats(last_x_hours: int, limit: int = 10, query_name: Op
     query_name_filter = ""
     if query_name:
         # Ensure the query_id is sanitized to prevent SQL injection
-        query_name_filter = f""
-            "AND query_id LIKE '%{query_name}%'
+        query_name_filter = f"""
+        AND query_id LIKE '%{query_name}%' 
             """
 
     QUERY = f"""
@@ -443,8 +448,8 @@ def get_query_execution_stats(last_x_hours: int, limit: int = 10, query_name: Op
 
 @mcp.tool()
 def explain_clickhouse_query(
-    query: str, 
-    explain_plan: bool = False, 
+    query: str,
+    explain_plan: bool = False,
     explain_pipeline: bool = False,
     explain_estimate: bool = False
 ) -> Dict[str, Any]:
@@ -465,7 +470,7 @@ def explain_clickhouse_query(
     """
     client = get_clickhouse_client()
     result = {}
-    
+
     try:
         # Default EXPLAIN (query plan) - always run this
         try:
@@ -474,16 +479,17 @@ def explain_clickhouse_query(
                 result["default_explain"] = res.result_rows
         except Exception as e:
             result["default_explain_error"] = f"Error: {str(e)}"
-        
+
         # EXPLAIN PLAN with actions and indexes
         if explain_plan:
             try:
-                plan_res = client.query(f"EXPLAIN PLAN actions=1, indexes=1 {query}")
+                plan_res = client.query(
+                    f"EXPLAIN PLAN actions=1, indexes=1 {query}")
                 if plan_res is not None and plan_res.result_rows is not None and len(plan_res.result_rows) > 0:
                     result["explain_plan"] = plan_res.result_rows
             except Exception as e:
                 result["explain_plan_error"] = f"Error: {str(e)}"
-        
+
         # EXPLAIN PIPELINE with graph
         if explain_pipeline:
             try:
@@ -492,7 +498,7 @@ def explain_clickhouse_query(
                     result["explain_pipeline"] = pipe_res.result_rows
             except Exception as e:
                 result["explain_pipeline_error"] = f"Error: {str(e)}"
-        
+
         # EXPLAIN ESTIMATE
         if explain_estimate:
             try:
@@ -508,11 +514,11 @@ def explain_clickhouse_query(
                     }
             except Exception as e:
                 result["explain_estimate_error"] = f"Error: {str(e)}"
-        
+
         # Return the dictionary result directly
         if not result:
             return {"error": "No explain data returned from any of the explain methods."}
-            
+
         return result
     except Exception as e:
         return {"error": f"Error during explain operations: {str(e)}"}
@@ -536,7 +542,7 @@ def get_clickhouse_tables(database: Optional[str] = "default", databases: Option
             # Query tables from all supported databases
             dbs_to_query = ["default", "benchmark", "misc"]
             all_tables = {}
-            
+
             for db in dbs_to_query:
                 res = client.query(f"SHOW TABLES FROM {db}")
                 if res is not None and res.result_rows is not None and len(res.result_rows) > 0:
@@ -544,7 +550,7 @@ def get_clickhouse_tables(database: Optional[str] = "default", databases: Option
                     all_tables[db] = res.result_rows
                 else:
                     all_tables[db] = []
-                    
+
             # Convert to JSON string with size limit
             json_result = safe_json_dumps(all_tables, indent=2)
             return json_result
@@ -553,7 +559,7 @@ def get_clickhouse_tables(database: Optional[str] = "default", databases: Option
             res = client.query(f"SHOW TABLES FROM {database}")
             if res is None or res.result_rows is None or len(res.result_rows) == 0:
                 return f"No tables found in database '{database}'."
-            
+
             # Convert to JSON string with size limit
             json_result = safe_json_dumps(res.result_rows, indent=2)
             return json_result
