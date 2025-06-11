@@ -812,4 +812,4 @@ def lint_clickhouse_query(
 
 # Run the server if executed directly
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="streamable-http")
