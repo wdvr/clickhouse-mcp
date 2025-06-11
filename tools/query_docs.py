@@ -10,7 +10,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.clickhouse_mcp.docs_search import (
     load_chunks, 
     simple_search, 
-    get_context_snippet,
     sample_random_chunks,
     format_chunk_preview
 )
@@ -100,7 +99,7 @@ def main():
         
         if not os.path.exists(index_path):
             print(f"Error: FAISS index not found at {index_path}")
-            print(f"Run create_faiss_index.py first to create the index")
+            print("Run create_faiss_index.py first to create the index")
             return
         
         try:

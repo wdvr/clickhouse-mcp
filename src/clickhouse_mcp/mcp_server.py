@@ -8,13 +8,13 @@ from langchain_aws import BedrockEmbeddings
 import clickhouse_connect
 import json
 import datetime
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 import clickhouse_connect.common
 import clickhouse_connect.driver
 import clickhouse_connect.driver.client
 import clickhouse_connect.driver.exceptions
 import clickhouse_connect.driver.query
-from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.fastmcp import FastMCP
 import os
 import time
 import requests
@@ -69,7 +69,7 @@ def get_clean_error_string(clickhouse_error_msg: str) -> str:
         str: The cleaned error message
     """
     # Remove unnecessary details from the error message - everything before "received ClickHouse error"
-    if not "received ClickHouse error" in clickhouse_error_msg:
+    if "received ClickHouse error" not in clickhouse_error_msg:
         return clickhouse_error_msg
     return "Clickhouse error " + clickhouse_error_msg.split("received ClickHouse error")[-1].strip()
 

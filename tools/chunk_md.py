@@ -6,7 +6,7 @@ import yaml
 import pickle
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple
 from clickhouse_mcp.docs_search import get_project_root
 
 def extract_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
@@ -491,10 +491,7 @@ def process_header_sections(
         else:
             section_counts[section_title] = 1
             unique_section_title = section_title
-        
-        # Section path for this section
-        section_path = [unique_section_title]
-        
+
         # Process this section based on its structure
         # For H2 sections, check for H3 subsections
         if header_level == 2:

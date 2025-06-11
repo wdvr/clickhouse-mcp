@@ -3,7 +3,7 @@
 import pickle
 import random
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 
 def get_package_root() -> Path:
@@ -26,7 +26,8 @@ def get_default_pickle_path() -> Path:
     return get_project_root() / "index" / "clickhouse_docs_chunks.pkl"
 
 
-def load_chunks(pickle_path: Optional[str] = None) -> List[Dict[str, Any]]:
+
+def load_chunks(pickle_path: Optional[Union[str, Path]] = None) -> List[Dict[str, Any]]:
     """Load document chunks from a pickle file.
     
     Args:
@@ -37,7 +38,7 @@ def load_chunks(pickle_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     if pickle_path is None:
         pickle_path = get_default_pickle_path()
-    
+
     with open(pickle_path, 'rb') as f:
         return pickle.load(f)
 

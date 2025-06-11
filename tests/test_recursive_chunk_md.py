@@ -3,7 +3,6 @@
 import sys
 import os
 import unittest
-from pathlib import Path
 
 # Add the tools directory to the path so we can import chunk_md
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))

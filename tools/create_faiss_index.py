@@ -33,10 +33,8 @@ Usage:
 """
 
 import sys
-import os
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any, Optional
 
 # Add the parent directory to sys.path to allow importing the module
 sys.path.append(str(Path(__file__).parent.parent))

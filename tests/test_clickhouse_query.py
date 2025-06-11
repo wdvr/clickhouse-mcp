@@ -1,7 +1,6 @@
 import os
 import unittest
 import json
-import tempfile
 from unittest import skipUnless, mock
 from unittest.mock import MagicMock, patch
 
@@ -54,7 +53,7 @@ class TestClickhouseQuery(unittest.TestCase):
         self.mock_client.query.return_value = mock_result
 
         # Call the function
-        with patch('builtins.open', mock_open := mock.mock_open()) as mock_file:
+        with patch('builtins.open', mock.mock_open()) as mock_file:
             result = run_clickhouse_query("SELECT * FROM test_table")
         
         # Assertions
@@ -81,7 +80,8 @@ class TestClickhouseQuery(unittest.TestCase):
         # The function now returns a dictionary with result information
         self.assertIsInstance(result, dict)
         self.assertIsNotNone(result["result_file"])
-        self.assertEqual(result["result_rows"], 0)  # Should be 0 rows
+        # result_rows should be an empty list when no rows are returned
+        self.assertEqual(result["result_rows"], [])
         self.assertEqual(result["query_id"], "empty_query_id")
         self.assertEqual(result["columns"], ["column1", "column2"])
         
@@ -111,8 +111,8 @@ class TestClickhouseQuery(unittest.TestCase):
         self.mock_client.query.side_effect = mock_query_side_effect
         
         # Use patch to avoid actual file operations
-        with patch('builtins.open', mock.mock_open()) as mock_file, \
-             patch('time.sleep') as mock_sleep:  # Also patch sleep to avoid delays
+        with patch('builtins.open', mock.mock_open()), \
+             patch('time.sleep'):  # Patch sleep to avoid delays
             
             result = run_clickhouse_query("SELECT * FROM test_table", measure_performance=True)
         
@@ -123,7 +123,7 @@ class TestClickhouseQuery(unittest.TestCase):
         self.assertNotIn("query_id =", self.mock_client.query.call_args_list[0].args[0])
         
         # Check that the second query (to system.query_log) uses the server-generated query_id
-        self.assertIn(f"query_id = 'server_generated_query_id_12345'", 
+        self.assertIn("query_id = 'server_generated_query_id_12345'", 
                      str(self.mock_client.query.call_args_list[1]))
         self.assertEqual(self.mock_client.query.call_count, 2)  # Original query + query_log query
         
