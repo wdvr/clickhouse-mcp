@@ -10,8 +10,10 @@ The MCP server provides tools for interacting with ClickHouse data and documenta
 
 ```bash
 # Start the MCP server
-python -m clickhouse_mcp.mcp_server
+python -m clickhouse_mcp
 ```
+
+The server exposes a Streamable HTTP endpoint at `http://localhost:8000/mcp`.
 
 Available MCP tools:
 

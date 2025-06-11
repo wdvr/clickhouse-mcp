@@ -27,7 +27,7 @@ pip install -e git+https://github.com/izaitsevfb/clickhouse-mcp.git#egg=clickhou
 2. Add this MCP server to claude code:
 
 ```bash
-claude mcp add-json clickhouse '{ "type": "stdio", "command": "python", "args": [ "-m", "clickhouse_mcp" ], "env": {} }'
+claude mcp add-json clickhouse '{ "type": "streamable_http", "url": "http://localhost:8000/mcp" }'
 ```
 
 Note: by default mcp config applies only to running in the current directory. If you want to use is globally, add 
@@ -44,7 +44,13 @@ See [`.env.example`](.env.example) for the list of required variables related to
 AWS credentials must also be set: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` 
 for semantic search to work.
 
-4. Run claude code as usual:
+4. Start the MCP server:
+
+```bash
+python -m clickhouse_mcp
+```
+
+5. Run claude code as usual:
 
 ```bash
 claude
