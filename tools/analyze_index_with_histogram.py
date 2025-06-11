@@ -2,8 +2,7 @@
 
 import pickle
 import os
-from pathlib import Path
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 from clickhouse_mcp.docs_search import get_default_pickle_path
 

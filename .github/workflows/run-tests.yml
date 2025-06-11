@@ -35,3 +35,9 @@ jobs:
         run: |
           source venv/bin/activate
           python run_tests.py
+
+      - name: Run Ruff linter
+        run: |
+          source venv/bin/activate
+          ruff check .
+
