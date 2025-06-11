@@ -80,6 +80,7 @@ class TestClickhouseQuery(unittest.TestCase):
         # The function now returns a dictionary with result information
         self.assertIsInstance(result, dict)
         self.assertIsNotNone(result["result_file"])
+
         # result_rows should be an empty list when no rows are returned
         self.assertEqual(result["result_rows"], [])
         self.assertEqual(result["query_id"], "empty_query_id")
