@@ -821,4 +821,4 @@ def lint_clickhouse_query(
 
 # Run the server if executed directly
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="sse", host="0.0.0.0")
