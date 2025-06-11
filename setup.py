@@ -19,6 +19,7 @@ setup(
         "python-dotenv>=0.21.0",
         "faiss-cpu>=1.7.4",
         "sqlfluff>=2.3.0",
+        "fastmcp>2.3",
     ],
     python_requires=">=3.7",
 )

@@ -14,7 +14,7 @@ import clickhouse_connect.driver
 import clickhouse_connect.driver.client
 import clickhouse_connect.driver.exceptions
 import clickhouse_connect.driver.query
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 import os
 import time
 import requests
@@ -174,6 +174,7 @@ def readme_howto_use_clickhouse_tools() -> str:
 
         Use this to create and run queries if user asks things like: 'what's the slowest query? How can I query X in ClickHouse?'
         """)
+
 
 
 @mcp.tool()
@@ -347,6 +348,7 @@ def run_clickhouse_query(query: str, inline_result_limit_bytes: int = 1024, meas
         }
 
 
+
 @mcp.tool()
 def get_clickhouse_schema(table_name: str) -> str:
     """Get the schema of a ClickHouse table.
@@ -385,6 +387,7 @@ def get_clickhouse_schema(table_name: str) -> str:
         return json_result
     except Exception as e:
         return f"Error: {e}"
+
 
 
 @mcp.tool()
@@ -444,6 +447,7 @@ def get_query_execution_stats(last_x_hours: int, limit: int = 10, query_name: Op
         return f"Clickhouse query error: {get_clean_error_string(str(e))}"
     except Exception as e:
         return f"Unexpected error: {e}"
+
 
 
 @mcp.tool()
@@ -524,6 +528,7 @@ def explain_clickhouse_query(
         return {"error": f"Error during explain operations: {str(e)}"}
 
 
+
 @mcp.tool()
 def get_clickhouse_tables(database: Optional[str] = "default", databases: Optional[str] = None) -> str:
     """Get the list of tables in the ClickHouse database.
@@ -565,6 +570,7 @@ def get_clickhouse_tables(database: Optional[str] = "default", databases: Option
             return json_result
     except Exception as e:
         return f"Error: {e}"
+
 
 
 @mcp.tool()
@@ -626,6 +632,7 @@ def get_query_details(query_name: str, include_params: Optional[bool] = True, in
                 "error"] = f"Error: Failed to get performance samples from ClickHouse. {e}"
 
     return json.dumps(result_json, default=datetime_serializer, indent=2)
+
 
 
 # Vector store singleton
@@ -725,6 +732,7 @@ def semantic_search_docs(
         return f"ERROR: Search failed: {str(e)}"
 
 
+
 @mcp.tool()
 def lint_clickhouse_query(
     query: str,
@@ -810,6 +818,12 @@ def lint_clickhouse_query(
         }
 
 
+
 # Run the server if executed directly
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    mcp.run(
+        transport="streamable-http",
+        host="127.0.0.1",
+        port=8000,
+        path="/mcp",
+    )
