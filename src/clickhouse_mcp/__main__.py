@@ -7,7 +7,7 @@ from clickhouse_mcp.mcp_server import mcp
 def main() -> None:
     """Launch the MCP server using Streamable HTTP."""
     print("Starting PyTorch ClickHouse MCP server...")
-    mcp.run(transport="sse")
+    mcp.run(transport="sse", host="0.0.0.0")
 
 
 if __name__ == "__main__":
